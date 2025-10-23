@@ -1,0 +1,3365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0, maximum-scale=1"
+  />
+  <title>Let'sDate Zim - Find Your Perfect Match</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link
+    rel="stylesheet"
+    href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+  />
+  <script>
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            primary: "#5D5CDE",
+            "primary-dark": "#4a49c5",
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; }
+    .gradient-bg { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+    .card-shadow { box-shadow: 0 10px 40px rgba(0,0,0,0.1); }
+    .message-bubble { max-width: 70%; word-wrap: break-word; }
+    .swipe-card { transition: transform 0.3s ease, opacity 0.3s ease; }
+    .swipe-left { transform: translateX(-100%) rotate(-30deg); opacity: 0; }
+    .swipe-right { transform: translateX(100%) rotate(30deg); opacity: 0; }
+    .profile-img { object-fit: cover; width: 100%; height: 100%; }
+    .photo-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .photo-item { position: relative; aspect-ratio: 1; overflow: hidden; border-radius: 8px; cursor: pointer; }
+    .photo-item img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.3s ease; }
+    .photo-item:hover img { transform: scale(1.05); }
+    .carousel-dot { width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,0.5); transition: all 0.3s ease; }
+    .carousel-dot.active { background: white; width: 24px; border-radius: 4px; }
+    .notification-badge { position: absolute; top: -5px; right: -5px; background: #ef4444; color: white; border-radius: 50%; width: 20px; height: 20px; font-size: 12px; display: flex; align-items: center; justify-content: center; }
+    input[type="text"], input[type="email"], input[type="password"], input[type="number"], input[type="date"], textarea, select { font-size: 16px; }
+    .animate-fade-in { animation: fadeIn 0.3s ease-in; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    .modal-backdrop { backdrop-filter: blur(4px); }
+    .dark .card-shadow { box-shadow: 0 10px 40px rgba(0,0,0,0.3); }
+    .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+    /* New: clickable profile affordance */
+    .clickable { cursor: pointer; }
+
+    /* Offline overlays */
+    .offline-overlay {
+      position: fixed; inset: 0;
+      display: none;
+      align-items: center; justify-content: center;
+      background: #0f172a; color: #fff; z-index: 1000;
+    }
+    .offline-overlay.active { display: flex; }
+    .offline-banner {
+      position: fixed; top: 0; left: 0; right: 0;
+      background: #ef4444; color: #fff; text-align: center;
+      padding: 6px 10px; font-size: 14px; z-index: 1001;
+      display: none;
+    }
+    .offline-banner.active { display: block; }
+  </style>
+</head>
+<body class="bg-white dark:bg-gray-900 transition-colors duration-200">
+  <!-- Offline full-screen overlay (shown if no connection on load) -->
+  <div id="offline-overlay" class="offline-overlay">
+    <div class="text-center px-6">
+      <i class="fas fa-wifi-slash text-6xl mb-4 text-red-400"></i>
+      <h1 class="text-3xl font-bold mb-2">No Internet Connection</h1>
+      <p class="text-gray-300">Please check your connection and try again.</p>
+    </div>
+  </div>
+  <!-- Online/offline banner (when connection drops while app runs) -->
+  <div id="offline-banner" class="offline-banner">
+    You are offline. Some features may be unavailable.
+  </div>
+
+  <div id="app"></div>
+
+  <script>
+    /* eslint-disable no-restricted-globals */
+    // ============================================
+    // OFFLINE HANDLING (global)
+    // ============================================
+    const Offline = {
+      init() {
+        const overlay = document.getElementById("offline-overlay");
+        const banner = document.getElementById("offline-banner");
+
+        const updateState = () => {
+          const online = navigator.onLine;
+          if (!online && !AppState.initialized) {
+            overlay.classList.add("active");
+          } else {
+            overlay.classList.remove("active");
+          }
+          if (!online && AppState.initialized) {
+            banner.classList.add("active");
+          } else {
+            banner.classList.remove("active");
+          }
+        };
+
+        window.addEventListener("online", updateState);
+        window.addEventListener("offline", updateState);
+        updateState();
+      },
+      hideOverlayIfOnline() {
+        const overlay = document.getElementById("offline-overlay");
+        if (navigator.onLine) overlay.classList.remove("active");
+      }
+    };
+
+    // ============================================
+    // DATA LAYER - LocalStorage Management
+    // ============================================
+
+    const DB = {
+      init() {
+        if (!localStorage.getItem("letsdate_users")) {
+          localStorage.setItem("letsdate_users", JSON.stringify([]));
+        }
+        if (!localStorage.getItem("letsdate_matches")) {
+          localStorage.setItem("letsdate_matches", JSON.stringify([]));
+        }
+        if (!localStorage.getItem("letsdate_messages")) {
+          localStorage.setItem("letsdate_messages", JSON.stringify([]));
+        }
+        if (!localStorage.getItem("letsdate_reports")) {
+          localStorage.setItem("letsdate_reports", JSON.stringify([]));
+        }
+        if (!localStorage.getItem("letsdate_likes")) {
+          localStorage.setItem("letsdate_likes", JSON.stringify([]));
+        }
+        // NEW: dislikes store
+        if (!localStorage.getItem("letsdate_dislikes")) {
+          localStorage.setItem("letsdate_dislikes", JSON.stringify([]));
+        }
+        if (!localStorage.getItem("letsdate_admin")) {
+          localStorage.setItem(
+            "letsdate_admin",
+            JSON.stringify({
+              username: "appadmin",
+              password: "munashe2005",
+            })
+          );
+        }
+        if (!localStorage.getItem("letsdate_logs")) {
+          localStorage.setItem("letsdate_logs", JSON.stringify([]));
+        }
+        // Admin messages store
+        if (!localStorage.getItem("letsdate_admin_messages")) {
+          localStorage.setItem("letsdate_admin_messages", JSON.stringify([]));
+        }
+      },
+
+      getUsers() {
+        return JSON.parse(localStorage.getItem("letsdate_users") || "[]");
+      },
+
+      setUsers(users) {
+        localStorage.setItem("letsdate_users", JSON.stringify(users));
+      },
+
+      getUser(userId) {
+        const users = this.getUsers();
+        return users.find((u) => u.id === userId);
+      },
+
+      getUserByEmail(email) {
+        const users = this.getUsers();
+        return users.find((u) => u.email.toLowerCase() === email.toLowerCase());
+      },
+
+      addUser(user) {
+        const users = this.getUsers();
+        users.push(user);
+        this.setUsers(users);
+        this.addLog("user_registered", `New user: ${user.name}`);
+      },
+
+      updateUser(userId, updates) {
+        const users = this.getUsers();
+        const index = users.findIndex((u) => u.id === userId);
+        if (index !== -1) {
+          users[index] = { ...users[index], ...updates };
+          this.setUsers(users);
+        }
+      },
+
+      deleteUser(userId) {
+        const users = this.getUsers().filter((u) => u.id !== userId);
+        this.setUsers(users);
+        // Also clean related relations
+        localStorage.setItem("letsdate_likes",
+          JSON.stringify(this.getLikes().filter(l => l.fromId !== userId && l.toId !== userId)));
+        localStorage.setItem("letsdate_dislikes",
+          JSON.stringify(this.getDislikes().filter(d => d.fromId !== userId && d.toId !== userId)));
+        localStorage.setItem("letsdate_matches",
+          JSON.stringify(this.getMatches().filter(m => !m.users.includes(userId))));
+        localStorage.setItem("letsdate_messages",
+          JSON.stringify(this.getMessages().filter(m => m.fromId !== userId && m.toId !== userId)));
+        this.addLog("user_deleted", `User ID: ${userId}`);
+      },
+
+      getMatches() {
+        return JSON.parse(localStorage.getItem("letsdate_matches") || "[]");
+      },
+
+      addMatch(userId1, userId2) {
+        const matches = this.getMatches();
+        if (!matches.some(m => m.users.includes(userId1) && m.users.includes(userId2))) {
+          matches.push({
+            id: Date.now() + Math.random(),
+            users: [userId1, userId2],
+            timestamp: Date.now(),
+          });
+          localStorage.setItem("letsdate_matches", JSON.stringify(matches));
+          this.addLog("match_created", `Users: ${userId1} & ${userId2}`);
+        }
+      },
+
+      getUserMatches(userId) {
+        const matches = this.getMatches();
+        return matches.filter((m) => m.users.includes(userId));
+      },
+
+      getMessages() {
+        return JSON.parse(localStorage.getItem("letsdate_messages") || "[]");
+      },
+
+      addMessage(fromId, toId, text) {
+        const messages = this.getMessages();
+        messages.push({
+          id: Date.now() + Math.random(),
+          fromId,
+          toId,
+          text,
+          timestamp: Date.now(),
+          read: false,
+        });
+        localStorage.setItem("letsdate_messages", JSON.stringify(messages));
+      },
+
+      getConversation(userId1, userId2) {
+        const messages = this.getMessages();
+        return messages
+          .filter(
+            (m) =>
+              (m.fromId === userId1 && m.toId === userId2) ||
+              (m.fromId === userId2 && m.toId === userId1)
+          )
+          .sort((a, b) => a.timestamp - b.timestamp);
+      },
+
+      markMessagesAsRead(userId, fromId) {
+        const messages = this.getMessages();
+        let changed = false;
+        messages.forEach((m) => {
+          if (m.toId === userId && m.fromId === fromId && !m.read) {
+            m.read = true;
+            changed = true;
+          }
+        });
+        if (changed) {
+          localStorage.setItem("letsdate_messages", JSON.stringify(messages));
+        }
+      },
+
+      getUnreadCount(userId) {
+        const messages = this.getMessages();
+        return messages.filter((m) => m.toId === userId && !m.read).length;
+      },
+
+      getLikes() {
+        return JSON.parse(localStorage.getItem("letsdate_likes") || "[]");
+      },
+
+      addLike(fromId, toId) {
+        const likes = this.getLikes();
+        if (!likes.find((l) => l.fromId === fromId && l.toId === toId)) {
+          likes.push({ fromId, toId, timestamp: Date.now() });
+          localStorage.setItem("letsdate_likes", JSON.stringify(likes));
+
+          // Check for mutual like (match)
+          if (likes.find((l) => l.fromId === toId && l.toId === fromId)) {
+            this.addMatch(fromId, toId);
+          }
+        }
+      },
+
+      hasLiked(fromId, toId) {
+        const likes = this.getLikes();
+        return likes.some((l) => l.fromId === fromId && l.toId === toId);
+      },
+
+      // NEW: dislikes persistence
+      getDislikes() {
+        return JSON.parse(localStorage.getItem("letsdate_dislikes") || "[]");
+      },
+      addDislike(fromId, toId) {
+        const dislikes = this.getDislikes();
+        if (!dislikes.find(d => d.fromId === fromId && d.toId === toId)) {
+          dislikes.push({ fromId, toId, timestamp: Date.now() });
+          localStorage.setItem("letsdate_dislikes", JSON.stringify(dislikes));
+          this.addLog("user_disliked", `User ${fromId} disliked ${toId}`);
+        }
+      },
+      removeDislike(fromId, toId) {
+        const dislikes = this.getDislikes().filter(d => !(d.fromId === fromId && d.toId === toId));
+        localStorage.setItem("letsdate_dislikes", JSON.stringify(dislikes));
+      },
+      hasDisliked(fromId, toId) {
+        const dislikes = this.getDislikes();
+        return dislikes.some((d) => d.fromId === fromId && d.toId === toId);
+      },
+
+      getReports() {
+        return JSON.parse(localStorage.getItem("letsdate_reports") || "[]");
+      },
+
+      addReport(reporterId, reportedId, reason, description) {
+        const reports = this.getReports();
+        reports.push({
+          id: Date.now() + Math.random(),
+          reporterId,
+          reportedId,
+          reason,
+          description,
+          timestamp: Date.now(),
+          status: "pending",
+        });
+        localStorage.setItem("letsdate_reports", JSON.stringify(reports));
+        this.addLog(
+          "report_created",
+          `User ${reportedId} reported by ${reporterId}`
+        );
+      },
+
+      updateReport(reportId, status) {
+        const reports = this.getReports();
+        const report = reports.find((r) => r.id === reportId);
+        if (report) {
+          report.status = status;
+          localStorage.setItem("letsdate_reports", JSON.stringify(reports));
+          this.addLog(
+            "report_updated",
+            `Report ${reportId} status: ${status}`
+          );
+        }
+      },
+
+      getAdminCreds() {
+        return JSON.parse(localStorage.getItem("letsdate_admin"));
+      },
+
+      updateAdminPassword(newPassword) {
+        const admin = this.getAdminCreds();
+        admin.password = newPassword;
+        localStorage.setItem("letsdate_admin", JSON.stringify(admin));
+        this.addLog("admin_password_changed", "Password updated");
+      },
+
+      addLog(action, details) {
+        const logs = JSON.parse(localStorage.getItem("letsdate_logs") || "[]");
+        logs.unshift({
+          id: Date.now() + Math.random(),
+          action,
+          details,
+          timestamp: Date.now(),
+        });
+        if (logs.length > 1000) logs.pop();
+        localStorage.setItem("letsdate_logs", JSON.stringify(logs));
+      },
+
+      getLogs(limit = 100) {
+        const logs = JSON.parse(localStorage.getItem("letsdate_logs") || "[]");
+        return logs.slice(0, limit);
+      },
+
+      // Admin messages storage
+      getAdminMessages() {
+        return JSON.parse(localStorage.getItem("letsdate_admin_messages") || "[]");
+      },
+
+      addAdminMessage(toUserId, text) {
+        const msgs = this.getAdminMessages();
+        msgs.push({
+          id: Date.now() + Math.random(),
+          toUserId,
+          text,
+          timestamp: Date.now(),
+          read: false,
+        });
+        localStorage.setItem("letsdate_admin_messages", JSON.stringify(msgs));
+        this.addLog("admin_message_sent", `To user ${toUserId}`);
+      },
+
+      markAdminMessagesAsRead(userId) {
+        const msgs = this.getAdminMessages();
+        let changed = false;
+        msgs.forEach((m) => {
+          if (m.toUserId === userId && !m.read) {
+            m.read = true;
+            changed = true;
+          }
+        });
+        if (changed) {
+          localStorage.setItem("letsdate_admin_messages", JSON.stringify(msgs));
+        }
+      },
+
+      getUnreadAdminCount(userId) {
+        const msgs = this.getAdminMessages();
+        return msgs.filter((m) => m.toUserId === userId && !m.read).length;
+      },
+    };
+
+    // ============================================
+    // APP STATE MANAGEMENT
+    // ============================================
+
+    const AppState = {
+      currentUser: null,
+      currentView: "landing",
+      isAdmin: false,
+      initialized: false,
+
+      init() {
+        Offline.init();
+        if (!navigator.onLine) {
+          // Wait until online to boot the app area
+          return;
+        }
+
+        DB.init();
+
+        // Restore session
+        const session = localStorage.getItem("letsdate_session");
+        if (session) {
+          const { userId, isAdmin } = JSON.parse(session);
+          if (isAdmin) {
+            this.isAdmin = true;
+            this.currentView = "admin";
+          } else if (userId) {
+            this.currentUser = DB.getUser(userId);
+            if (this.currentUser) {
+              this.currentView = "main";
+            }
+          }
+        }
+
+        // Dark mode respect
+        const prefersDark = window.matchMedia &&
+          window.matchMedia("(prefers-color-scheme: dark)").matches;
+        if (prefersDark) document.documentElement.classList.add("dark");
+        window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (event) => {
+          if (event.matches) {
+            document.documentElement.classList.add("dark");
+          } else {
+            document.documentElement.classList.remove("dark");
+          }
+        });
+
+        this.initialized = true;
+        Offline.hideOverlayIfOnline();
+        this.render();
+      },
+
+      setView(view) {
+        this.currentView = view;
+        this.render();
+      },
+
+      login(user) {
+        this.currentUser = user;
+        localStorage.setItem(
+          "letsdate_session",
+          JSON.stringify({ userId: user.id, isAdmin: false })
+        );
+        this.currentView = "main";
+        DB.addLog("user_login", `User: ${user.name}`);
+        this.render();
+      },
+
+      loginAdmin() {
+        this.isAdmin = true;
+        localStorage.setItem("letsdate_session", JSON.stringify({ isAdmin: true }));
+        this.currentView = "admin";
+        DB.addLog("admin_login", "Admin logged in");
+        this.render();
+      },
+
+      logout() {
+        if (this.isAdmin) {
+          DB.addLog("admin_logout", "Admin logged out");
+        } else if (this.currentUser) {
+          DB.addLog("user_logout", `User: ${this.currentUser.name}`);
+        }
+        this.currentUser = null;
+        this.isAdmin = false;
+        this.currentView = "landing";
+        localStorage.removeItem("letsdate_session");
+        this.render();
+      },
+
+      render() {
+        const app = document.getElementById("app");
+        if (!navigator.onLine) {
+          // Keep offline overlay active and do not render app
+          return;
+        }
+        if (this.isAdmin) {
+          app.innerHTML = AdminDashboard.render();
+          AdminDashboard.init();
+        } else if (this.currentView === "landing") {
+          app.innerHTML = LandingPage.render();
+          LandingPage.init();
+        } else if (this.currentView === "login") {
+          app.innerHTML = LoginPage.render();
+          LoginPage.init();
+        } else if (this.currentView === "register") {
+          app.innerHTML = RegisterPage.render();
+          RegisterPage.init();
+        } else if (this.currentView === "main") {
+          app.innerHTML = MainApp.render();
+          MainApp.init();
+        }
+      },
+    };
+
+    // ============================================
+    // UTILITY FUNCTIONS
+    // ============================================
+
+    const Utils = {
+      generateId() {
+        return Date.now() + "_" + Math.random().toString(36).substr(2, 9);
+      },
+
+      async compressImage(file, maxWidth = 1200, quality = 0.8) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            const img = new Image();
+            img.onload = () => {
+              const canvas = document.createElement("canvas");
+              let width = img.width;
+              let height = img.height;
+
+              if (width > maxWidth) {
+                height = (height * maxWidth) / width;
+                width = maxWidth;
+              }
+
+              canvas.width = width;
+              canvas.height = height;
+
+              const ctx = canvas.getContext("2d");
+              ctx.drawImage(img, 0, 0, width, height);
+
+              canvas.toBlob(
+                (blob) => {
+                  const reader2 = new FileReader();
+                  reader2.onloadend = () =>
+                    resolve({ dataUrl: reader2.result, blob });
+                  reader2.onerror = reject;
+                  reader2.readAsDataURL(blob);
+                },
+                "image/jpeg",
+                quality
+              );
+            };
+            img.onerror = reject;
+            img.src = e.target.result;
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+      },
+
+      // Try uploading compressed blob to server and return absolute URL
+      async uploadImageToServer(blob) {
+        const formData = new FormData();
+        const file = new File([blob], `photo-${Date.now()}.jpg`, {
+          type: "image/jpeg",
+        });
+        formData.append("photo", file);
+
+        const loadingToast = document.createElement("div");
+        loadingToast.className =
+          "fixed top-4 right-4 px-6 py-3 rounded-lg shadow-lg z-50 bg-blue-500 text-white flex items-center space-x-2";
+        loadingToast.innerHTML =
+          '<i class="fas fa-spinner fa-spin"></i><span>Uploading photo...</span>';
+        document.body.appendChild(loadingToast);
+
+        try {
+          const res = await fetch("/api/upload", {
+            method: "POST",
+            body: formData,
+          });
+
+          loadingToast.remove();
+
+          if (!res.ok) throw new Error("Upload failed");
+          const json = await res.json();
+          if (!json.ok || !json.url) throw new Error("Invalid upload response");
+
+          const absoluteUrl = new URL(json.url, window.location.origin).toString();
+          return absoluteUrl;
+        } catch (err) {
+          loadingToast.remove();
+          console.error("Upload error:", err);
+          this.showToast(
+            "Error uploading image to server. Using local image instead.",
+            "error"
+          );
+          return null;
+        }
+      },
+
+      // Updated: tries server upload; falls back to data URL
+      async handleImageUpload(acceptMultiple = false) {
+        return new Promise((resolve) => {
+          const input = document.createElement("input");
+          input.type = "file";
+          input.accept = "image/*";
+          input.multiple = acceptMultiple;
+
+          input.onchange = async (e) => {
+            const files = Array.from(e.target.files);
+            if (files.length === 0) {
+              resolve(null);
+              return;
+            }
+
+            const processingToast = document.createElement("div");
+            processingToast.className =
+              "fixed top-4 right-4 px-6 py-3 rounded-lg shadow-lg z-50 bg-blue-500 text-white flex items-center space-x-2";
+            processingToast.innerHTML = `
+              <i class="fas fa-spinner fa-spin"></i>
+              <span>Processing ${files.length} photo${files.length > 1 ? "s" : ""}...</span>
+            `;
+            document.body.appendChild(processingToast);
+
+            try {
+              const compressed = await Promise.all(
+                files.map((file) => this.compressImage(file))
+              );
+              processingToast.remove();
+
+              const results = [];
+              for (const c of compressed) {
+                let url = await this.uploadImageToServer(c.blob);
+                if (!url) url = c.dataUrl;
+                results.push(url);
+              }
+
+              this.showToast(
+                `${results.length} photo${results.length > 1 ? "s" : ""} ready!`,
+                "success"
+              );
+              resolve(acceptMultiple ? results : results[0]);
+            } catch (error) {
+              processingToast.remove();
+              console.error("Image processing error:", error);
+              this.showToast("Error processing image. Please try again.", "error");
+              resolve(null);
+            }
+          };
+
+          input.onerror = () => {
+            this.showToast("Failed to open file picker", "error");
+            resolve(null);
+          };
+
+          input.click();
+        });
+      },
+
+      // Enhanced photo viewer: full details + download and profile link
+      showPhotoViewerWithDetails(user, startIndex = 0) {
+        const photos = user.photos && user.photos.length ? user.photos : [];
+        let currentIndex = Math.max(0, Math.min(startIndex, photos.length - 1));
+        const modal = document.createElement("div");
+        modal.className =
+          "fixed inset-0 bg-black bg-opacity-95 z-50 flex items-center justify-center";
+        const age = this.calculateAge(user.birthDate);
+        const downloadIcon = `
+          <a class="download-link text-white hover:text-gray-300 text-2xl z-10" download target="_blank" rel="noopener" href="#">
+            <i class="fas fa-download"></i>
+          </a>
+        `;
+        modal.innerHTML = `
+          <button class="absolute top-4 right-4 text-white text-3xl hover:text-gray-300 z-10 close-btn" aria-label="Close">
+            <i class="fas fa-times"></i>
+          </button>
+          ${
+            photos.length > 1
+              ? `
+            <button class="absolute left-2 md:left-4 text-white text-3xl md:text-4xl hover:text-gray-300 z-10 prev-btn" aria-label="Previous">
+              <i class="fas fa-chevron-left"></i>
+            </button>
+            <button class="absolute right-2 md:right-4 text-white text-3xl md:text-4xl hover:text-gray-300 z-10 next-btn" aria-label="Next">
+              <i class="fas fa-chevron-right"></i>
+            </button>
+          `
+              : ""
+          }
+          <div class="relative w-full h-full flex flex-col">
+            <div class="flex items-center justify-between px-4 md:px-6 py-3">
+              <div class="flex items-center space-x-3 text-white">
+                <div class="w-10 h-10 rounded-full overflow-hidden bg-white bg-opacity-20 flex items-center justify-center clickable user-profile-trigger" title="View profile">
+                  ${
+                    user.profilePicture
+                      ? `<img src="${user.profilePicture}" class="w-full h-full object-cover" alt="avatar">`
+                      : `<i class="fas fa-user"></i>`
+                  }
+                </div>
+                <div class="leading-tight">
+                  <div class="font-semibold">${user.name}, ${age}</div>
+                  <div class="text-xs text-white text-opacity-80"><i class="fas fa-map-marker-alt mr-1"></i>${user.city}</div>
+                </div>
+              </div>
+              <div class="flex items-center space-x-4">
+                ${downloadIcon}
+              </div>
+            </div>
+            <div class="flex-1 flex items-center justify-center p-2 md:p-4">
+              ${
+                photos.length
+                  ? `<img src="${photos[currentIndex]}" class="max-w-full max-h-full object-contain photo-display" alt="photo">`
+                  : `<div class="text-center text-white">
+                       <i class="fas fa-image text-6xl mb-4"></i>
+                       <p>No photos available</p>
+                     </div>`
+              }
+            </div>
+            <div class="px-4 md:px-6 pb-5">
+              ${
+                user.bio
+                  ? `<p class="text-sm md:text-base text-white text-opacity-90">${user.bio}</p>`
+                  : ""
+              }
+              ${
+                user.interests && user.interests.length
+                  ? `<div class="flex flex-wrap gap-2 mt-3">
+                      ${user.interests.map(i => `<span class="px-2 py-1 bg-white bg-opacity-10 text-white rounded-full text-xs">${i}</span>`).join("")}
+                    </div>`
+                  : ""
+              }
+              ${
+                photos.length > 1
+                  ? `
+                <div class="flex space-x-2 overflow-x-auto mt-4 pb-1">
+                  ${photos.map((p, i) => `
+                    <img src="${p}" data-index="${i}" class="h-14 w-14 object-cover rounded-md border-2 ${i===currentIndex ? 'border-white' : 'border-transparent'} thumb" alt="thumb ${i+1}">
+                  `).join("")}
+                </div>
+              ` : ""
+              }
+            </div>
+          </div>
+        `;
+        document.body.appendChild(modal);
+
+        const imgEl = modal.querySelector(".photo-display");
+        const downloadEl = modal.querySelector(".download-link");
+
+        const updateUI = () => {
+          if (imgEl) {
+            imgEl.src = photos[currentIndex];
+          }
+          if (downloadEl) {
+            downloadEl.href = photos[currentIndex] || "#";
+            const fileName = `photo-${user.name.replace(/\s+/g,'_')}-${currentIndex+1}.jpg`;
+            downloadEl.setAttribute("download", fileName);
+          }
+          modal.querySelectorAll(".thumb").forEach((t) => {
+            const idx = parseInt(t.getAttribute("data-index"));
+            t.classList.toggle("border-white", idx === currentIndex);
+            t.classList.toggle("border-transparent", idx !== currentIndex);
+          });
+          modal.querySelectorAll(".carousel-dot").forEach((dot, i) => {
+            dot.classList.toggle("active", i === currentIndex);
+          });
+        };
+
+        const prevBtn = modal.querySelector(".prev-btn");
+        const nextBtn = modal.querySelector(".next-btn");
+        if (prevBtn) prevBtn.onclick = () => { currentIndex = (currentIndex - 1 + photos.length) % photos.length; updateUI(); };
+        if (nextBtn) nextBtn.onclick = () => { currentIndex = (currentIndex + 1) % photos.length; updateUI(); };
+
+        modal.querySelectorAll(".thumb").forEach((t) => {
+          t.onclick = () => {
+            const idx = parseInt(t.getAttribute("data-index"));
+            currentIndex = idx;
+            updateUI();
+          };
+        });
+
+        modal.querySelector(".close-btn").onclick = () => modal.remove();
+        modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+
+        // Click avatar/name area -> open full profile modal
+        const profileTriggers = modal.querySelectorAll(".user-profile-trigger");
+        profileTriggers.forEach((el) => {
+          el.onclick = () => {
+            modal.remove();
+            MainApp.showUserFullProfile(user.id);
+          };
+        });
+
+        updateUI();
+      },
+
+      showPhotoViewer(photos, startIndex = 0) {
+        let currentIndex = startIndex;
+        const modal = document.createElement("div");
+        modal.className =
+          "fixed inset-0 bg-black bg-opacity-95 z-50 flex items-center justify-center";
+        modal.innerHTML = `
+          <button class="absolute top-4 right-4 text-white text-3xl hover:text-gray-300 z-10">
+            <i class="fas fa-times"></i>
+          </button>
+          ${
+            photos.length > 1
+              ? `
+            <button class="absolute left-4 text-white text-4xl hover:text-gray-300 z-10 prev-btn">
+              <i class="fas fa-chevron-left"></i>
+            </button>
+            <button class="absolute right-4 text-white text-4xl hover:text-gray-300 z-10 next-btn">
+              <i class="fas fa-chevron-right"></i>
+            </button>
+          `
+              : ""
+          }
+          <div class="relative max-w-4xl max-h-screen p-4">
+            <a class="absolute top-4 left-4 text-white hover:text-gray-300 text-2xl z-10 download-link" download target="_blank" rel="noopener" href="${photos[currentIndex]}" title="Download">
+              <i class="fas fa-download"></i>
+            </a>
+            <img src="${photos[currentIndex]}" class="max-w-full max-h-screen object-contain photo-display">
+            ${
+              photos.length > 1
+                ? `
+              <div class="absolute bottom-8 left-1/2 transform -translate-x-1/2 flex space-x-2">
+                ${photos
+                  .map(
+                    (_, i) => `
+                  <div class="carousel-dot ${i === currentIndex ? "active" : ""}"></div>
+                `
+                  )
+                  .join("")}
+              </div>
+            `
+                : ""
+            }
+          </div>
+        `;
+        document.body.appendChild(modal);
+        const updatePhoto = () => {
+          const img = modal.querySelector(".photo-display");
+          img.src = photos[currentIndex];
+          const d = modal.querySelector(".download-link");
+          if (d) {
+            d.href = photos[currentIndex];
+            d.setAttribute("download", `photo-${currentIndex + 1}.jpg`);
+          }
+          modal.querySelectorAll(".carousel-dot").forEach((dot, i) => {
+            dot.classList.toggle("active", i === currentIndex);
+          });
+        };
+        modal.querySelector(".fa-times").parentElement.onclick = () => modal.remove();
+        const prevBtn = modal.querySelector(".prev-btn");
+        const nextBtn = modal.querySelector(".next-btn");
+        if (prevBtn)
+          prevBtn.onclick = () => {
+            currentIndex = (currentIndex - 1 + photos.length) % photos.length;
+            updatePhoto();
+          };
+        if (nextBtn)
+          nextBtn.onclick = () => {
+            currentIndex = (currentIndex + 1) % photos.length;
+            updatePhoto();
+          };
+        modal.onclick = (e) => {
+          if (e.target === modal) modal.remove();
+        };
+      },
+
+      formatDate(timestamp) {
+        const date = new Date(timestamp);
+        const now = new Date();
+        const diff = now - date;
+        const minutes = Math.floor(diff / 60000);
+        const hours = Math.floor(diff / 3600000);
+        const days = Math.floor(diff / 86400000);
+        if (minutes < 1) return "Just now";
+        if (minutes < 60) return `${minutes}m ago`;
+        if (hours < 24) return `${hours}h ago`;
+        if (days < 7) return `${days}d ago`;
+        return date.toLocaleDateString();
+      },
+
+      calculateAge(birthDate) {
+        const today = new Date();
+        const birth = new Date(birthDate);
+        let age = today.getFullYear() - birth.getFullYear();
+        const monthDiff = today.getMonth() - birth.getMonth();
+        if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
+          age--;
+        }
+        return age;
+      },
+
+      showToast(message, type = "info", withUndo = null) {
+        const toast = document.createElement("div");
+        toast.className = `fixed bottom-4 left-1/2 -translate-x-1/2 px-6 py-3 rounded-lg shadow-lg z-50 animate-fade-in ${
+          type === "success"
+            ? "bg-green-500 text-white"
+            : type === "error"
+            ? "bg-red-500 text-white"
+            : "bg-blue-500 text-white"
+        }`;
+        toast.innerHTML = withUndo
+          ? `<span>${message}</span> <button class="ml-3 underline font-semibold">Undo</button>`
+          : message;
+        document.body.appendChild(toast);
+        let removed = false;
+        const remove = () => { if (!removed) { removed = true; toast.remove(); } };
+        let undoHandler = null;
+        if (withUndo && typeof withUndo === "function") {
+          undoHandler = () => { withUndo(); remove(); };
+          toast.querySelector("button").onclick = undoHandler;
+        }
+        setTimeout(remove, 3500);
+      },
+
+      showModal(config) {
+        const modal = document.createElement("div");
+        modal.className =
+          "fixed inset-0 bg-black bg-opacity-50 modal-backdrop flex items-center justify-center z-50 p-4";
+        modal.innerHTML = `
+          <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6 animate-fade-in">
+            <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-4">${config.title}</h3>
+            <p class="text-gray-700 dark:text-gray-300 mb-6">${config.message}</p>
+            <div class="flex justify-end space-x-3">
+              ${
+                config.showCancel !== false
+                  ? `
+                <button class="cancel-btn px-4 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition">
+                  ${config.cancelText || "Cancel"}
+                </button>
+              `
+                  : ""
+              }
+              <button class="confirm-btn px-4 py-2 ${
+                config.type === "danger"
+                  ? "bg-red-500 hover:bg-red-600"
+                  : "bg-primary hover:bg-primary-dark"
+              } text-white rounded-lg transition">
+                ${config.confirmText || "Confirm"}
+              </button>
+            </div>
+          </div>
+        `;
+        document.body.appendChild(modal);
+        return new Promise((resolve) => {
+          modal.querySelector(".confirm-btn").onclick = () => {
+            modal.remove();
+            resolve(true);
+          };
+          if (config.showCancel !== false) {
+            modal.querySelector(".cancel-btn").onclick = () => {
+              modal.remove();
+              resolve(false);
+            };
+          }
+          modal.onclick = (e) => {
+            if (e.target === modal && config.showCancel !== false) {
+              modal.remove();
+              resolve(false);
+            }
+          };
+        });
+      },
+
+      showPrompt(config) {
+        const modal = document.createElement("div");
+        modal.className =
+          "fixed inset-0 bg-black bg-opacity-50 modal-backdrop flex items-center justify-center z-50 p-4";
+        modal.innerHTML = `
+          <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6 animate-fade-in">
+            <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-4">${config.title}</h3>
+            <p class="text-gray-700 dark:text-gray-300 mb-4">${config.message}</p>
+            <input type="${config.inputType || "text"}"
+              class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-base focus:ring-2 focus:ring-primary focus:border-transparent"
+              placeholder="${config.placeholder || ""}"
+              value="${config.defaultValue || ""}">
+            <div class="flex justify-end space-x-3 mt-6">
+              <button class="cancel-btn px-4 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition">Cancel</button>
+              <button class="confirm-btn px-4 py-2 bg-primary hover:bg-primary-dark text-white rounded-lg transition">OK</button>
+            </div>
+          </div>
+        `;
+        document.body.appendChild(modal);
+        const input = modal.querySelector("input");
+        input.focus();
+        return new Promise((resolve) => {
+          const submit = () => {
+            const value = input.value.trim();
+            modal.remove();
+            resolve(value || null);
+          };
+          modal.querySelector(".confirm-btn").onclick = submit;
+          modal.querySelector(".cancel-btn").onclick = () => {
+            modal.remove();
+            resolve(null);
+          };
+          input.onkeypress = (e) => {
+            if (e.key === "Enter") submit();
+          };
+        });
+      },
+    };
+
+    // ============================================
+    // LANDING PAGE
+    // ============================================
+    const LandingPage = {
+      render() {
+        return `
+          <div class="min-h-screen gradient-bg flex items-center justify-center p-4">
+            <div class="text-center">
+              <div class="mb-8">
+                <i class="fas fa-heart text-white text-6xl mb-4"></i>
+                <h1 class="text-5xl md:text-6xl font-bold text-white mb-4">Let'sDate Zim</h1>
+                <p class="text-xl text-white opacity-90">Find Your Perfect Match in Zimbabwe</p>
+              </div>
+              <div class="space-y-4">
+                <button id="btn-login" class="w-64 bg-white text-primary font-semibold py-3 px-8 rounded-full hover:bg-gray-100 transition shadow-lg">
+                  Sign In
+                </button>
+                <br>
+                <button id="btn-register" class="w-64 bg-transparent border-2 border-white text-white font-semibold py-3 px-8 rounded-full hover:bg-white hover:text-primary transition">
+                  Create Account
+                </button>
+                <br>
+                <button id="btn-admin" class="text-white opacity-75 hover:opacity-100 text-sm underline">
+                  Admin Access
+                </button>
+              </div>
+            </div>
+          </div>
+        `;
+      },
+
+      init() {
+        document.getElementById("btn-login").onclick = () => AppState.setView("login");
+        document.getElementById("btn-register").onclick = () => AppState.setView("register");
+        document.getElementById("btn-admin").onclick = () => {
+          this.showAdminLogin();
+        };
+      },
+
+      async showAdminLogin() {
+        const modal = document.createElement("div");
+        modal.className =
+          "fixed inset-0 bg-black bg-opacity-50 modal-backdrop flex items-center justify-center z-50 p-4";
+        modal.innerHTML = `
+          <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6 animate-fade-in">
+            <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-4">Admin Login</h3>
+            <div class="space-y-4">
+              <input type="text" id="admin-username" placeholder="Username"
+                class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-base focus:ring-2 focus:ring-primary focus:border-transparent">
+              <input type="password" id="admin-password" placeholder="Password"
+                class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-base focus:ring-2 focus:ring-primary focus:border-transparent">
+            </div>
+            <div class="flex justify-end space-x-3 mt-6">
+              <button class="cancel-btn px-4 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition">Cancel</button>
+              <button class="login-btn px-4 py-2 bg-primary hover:bg-primary-dark text-white rounded-lg transition">Login</button>
+            </div>
+          </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        const usernameInput = modal.querySelector("#admin-username");
+        const passwordInput = modal.querySelector("#admin-password");
+
+        const attemptLogin = () => {
+          const username = usernameInput.value.trim();
+          const password = passwordInput.value;
+          const admin = DB.getAdminCreds();
+
+          if (username === admin.username && password === admin.password) {
+            modal.remove();
+            AppState.loginAdmin();
+          } else {
+            Utils.showToast("Invalid credentials", "error");
+          }
+        };
+
+        modal.querySelector(".login-btn").onclick = attemptLogin;
+        modal.querySelector(".cancel-btn").onclick = () => modal.remove();
+        passwordInput.onkeypress = (e) => {
+          if (e.key === "Enter") attemptLogin();
+        };
+      },
+    };
+
+    // ============================================
+    // LOGIN PAGE
+    // ============================================
+    const LoginPage = {
+      render() {
+        return `
+          <div class="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-4">
+            <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl max-w-md w-full p-8 card-shadow">
+              <div class="text-center mb-8">
+                <i class="fas fa-heart text-primary text-4xl mb-4"></i>
+                <h2 class="text-3xl font-bold text-gray-900 dark:text-white">Welcome Back</h2>
+                <p class="text-gray-600 dark:text-gray-400 mt-2">Sign in to continue</p>
+              </div>
+              <form id="login-form" class="space-y-4">
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Email</label>
+                  <input type="email" id="login-email" required
+                    class="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-base focus:ring-2 focus:ring-primary focus:border-transparent">
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Password</label>
+                  <input type="password" id="login-password" required
+                    class="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-base focus:ring-2 focus:ring-primary focus:border-transparent">
+                </div>
+                <button type="submit" class="w-full bg-primary hover:bg-primary-dark text-white font-semibold py-3 rounded-lg transition">
+                  Sign In
+                </button>
+              </form>
+              <div class="mt-6 text-center">
+                <p class="text-gray-600 dark:text-gray-400">
+                  Don't have an account?
+                  <button id="go-register" class="text-primary font-semibold hover:underline">Sign Up</button>
+                </p>
+                <button id="go-back" class="mt-4 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 text-sm">
+                  ← Back to Home
+                </button>
+              </div>
+            </div>
+          </div>
+        `;
+      },
+
+      init() {
+        document.getElementById("login-form").onsubmit = (e) => {
+          e.preventDefault();
+          const email = document.getElementById("login-email").value.trim();
+          const password = document.getElementById("login-password").value;
+
+          const user = DB.getUserByEmail(email);
+          if (!user) {
+            Utils.showToast("Account not found", "error");
+            return;
+          }
+          if (user.password !== password) {
+            Utils.showToast("Incorrect password", "error");
+            return;
+          }
+          if (user.suspended) {
+            Utils.showToast("Your account has been suspended", "error");
+            return;
+          }
+          AppState.login(user);
+        };
+
+        document.getElementById("go-register").onclick = () =>
+          AppState.setView("register");
+        document.getElementById("go-back").onclick = () =>
+          AppState.setView("landing");
+      },
+    };
+
+    // ============================================
+    // REGISTER PAGE
+    // ============================================
+    const RegisterPage = {
+      render() {
+        return `
+          <div class="min-h-screen bg-gray-50 dark:bg-gray-900 py-8 px-4">
+            <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl max-w-2xl w-full mx-auto p-8 card-shadow">
+              <div class="text-center mb-8">
+                <i class="fas fa-heart text-primary text-4xl mb-4"></i>
+                <h2 class="text-3xl font-bold text-gray-900 dark:text-white">Create Account</h2>
+                <p class="text-gray-600 dark:text-gray-400 mt-2">Find your perfect match today</p>
+              </div>
+              <form id="register-form" class="space-y-4">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Full Name *</label>
+                    <input type="text" id="reg-name" required
+                      class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-base focus:ring-2 focus:ring-primary focus:border-transparent">
+                  </div>
+                  <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Email *</label>
+                    <input type="email" id="reg-email" required
+                      class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-base focus:ring-2 focus:ring-primary focus:border-transparent">
+                  </div>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Password *</label>
+                    <input type="password" id="reg-password" required minlength="6"
+                      class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-base focus:ring-2 focus:ring-primary focus:border-transparent">
+                  </div>
+                  <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Birth Date *</label>
+                    <input type="date" id="reg-birthdate" required
+                      class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-base focus:ring-2 focus:ring-primary focus:border-transparent">
+                  </div>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Gender *</label>
+                    <select id="reg-gender" required
+                      class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-base focus:ring-2 focus:ring-primary focus:border-transparent">
+                      <option value="">Select...</option>
+                      <option value="Male">Male</option>
+                      <option value="Female">Female</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">City *</label>
+                    <input type="text" id="reg-city" required placeholder="e.g., Harare"
+                      class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-base focus:ring-2 focus:ring-primary focus:border-transparent">
+                  </div>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Bio</label>
+                  <textarea id="reg-bio" rows="3" placeholder="Tell us about yourself..."
+                    class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-base focus:ring-2 focus:ring-primary focus:border-transparent"></textarea>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Interests (comma-separated)</label>
+                  <input type="text" id="reg-interests" placeholder="e.g., Music, Travel, Sports"
+                    class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-base focus:ring-2 focus:ring-primary focus:border-transparent">
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Profile Picture (Optional)</label>
+                  <div class="flex items-center space-x-4">
+                    <div id="reg-photo-preview" class="w-24 h-24 rounded-full bg-gradient-to-br from-purple-400 to-pink-400 flex items-center justify-center overflow-hidden">
+                      <i class="fas fa-user text-white text-3xl"></i>
+                    </div>
+                    <button type="button" id="reg-upload-photo" class="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition">
+                      <i class="fas fa-camera mr-2"></i>Upload Photo
+                    </button>
+                  </div>
+                </div>
+                <button type="submit" class="w-full bg-primary hover:bg-primary-dark text-white font-semibold py-3 rounded-lg transition">
+                  Create Account
+                </button>
+              </form>
+              <div class="mt-6 text-center">
+                <p class="text-gray-600 dark:text-gray-400">
+                  Already have an account?
+                  <button id="go-login" class="text-primary font-semibold hover:underline">Sign In</button>
+                </p>
+                <button id="go-back" class="mt-4 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 text-sm">
+                  ← Back to Home
+                </button>
+              </div>
+            </div>
+          </div>
+        `;
+      },
+
+      init() {
+        const maxDate = new Date();
+        maxDate.setFullYear(maxDate.getFullYear() - 18);
+        document.getElementById("reg-birthdate").max =
+          maxDate.toISOString().split("T")[0];
+
+        let profilePhoto = null;
+
+        document.getElementById("reg-upload-photo").onclick = async () => {
+          const photo = await Utils.handleImageUpload(false);
+          if (photo) {
+            profilePhoto = photo;
+            const preview = document.getElementById("reg-photo-preview");
+            preview.innerHTML = `<img src="${photo}" class="profile-img" alt="Profile preview">`;
+          }
+        };
+
+        document.getElementById("register-form").onsubmit = (e) => {
+          e.preventDefault();
+
+          const email = document.getElementById("reg-email").value.trim();
+          if (DB.getUserByEmail(email)) {
+            Utils.showToast("Email already registered", "error");
+            return;
+          }
+
+          const birthDate = document.getElementById("reg-birthdate").value;
+          const age = Utils.calculateAge(birthDate);
+          if (age < 18) {
+            Utils.showToast("You must be at least 18 years old", "error");
+            return;
+          }
+
+          const interests = document
+            .getElementById("reg-interests")
+            .value.split(",")
+            .map((i) => i.trim())
+            .filter((i) => i);
+
+          const user = {
+            id: Utils.generateId(),
+            name: document.getElementById("reg-name").value.trim(),
+            email: email,
+            password: document.getElementById("reg-password").value,
+            birthDate: birthDate,
+            gender: document.getElementById("reg-gender").value,
+            city: document.getElementById("reg-city").value.trim(),
+            bio: document.getElementById("reg-bio").value.trim(),
+            interests: interests,
+            profilePicture: profilePhoto,
+            photos: profilePhoto ? [profilePhoto] : [],
+            createdAt: Date.now(),
+            suspended: false,
+          };
+
+          DB.addUser(user);
+          Utils.showToast("Account created successfully!", "success");
+          AppState.login(user);
+        };
+
+        document.getElementById("go-login").onclick = () =>
+          AppState.setView("login");
+        document.getElementById("go-back").onclick = () =>
+          AppState.setView("landing");
+      },
+    };
+
+    // ============================================
+    // MAIN APP
+    // ============================================
+    const MainApp = {
+      currentTab: "discover",
+      currentChatUser: null,
+
+      // Discover pagination state
+      pageSize: 6,
+      feedPage: 0,
+
+      render() {
+        return `
+          <div class="min-h-screen bg-gray-50 dark:bg-gray-900">
+            <nav class="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700">
+              <div class="max-w-7xl mx-auto px-4">
+                <div class="flex items-center justify-between h-16">
+                  <div class="flex items-center space-x-2">
+                    <i class="fas fa-heart text-primary text-2xl"></i>
+                    <span class="text-xl font-bold text-gray-900 dark:text-white">Let'sDate Zim</span>
+                  </div>
+                  <div class="flex items-center space-x-4">
+                    <button id="nav-discover" class="nav-btn text-gray-600 dark:text-gray-400 hover:text-primary px-3 py-2 rounded-lg transition" title="Discover">
+                      <i class="fas fa-compass"></i>
+                    </button>
+                    <button id="nav-matches" class="nav-btn text-gray-600 dark:text-gray-400 hover:text-primary px-3 py-2 rounded-lg transition relative" title="Matches">
+                      <i class="fas fa-heart"></i>
+                      <span id="matches-badge" class="notification-badge hidden">0</span>
+                    </button>
+                    <button id="nav-messages" class="nav-btn text-gray-600 dark:text-gray-400 hover:text-primary px-3 py-2 rounded-lg transition relative" title="Messages">
+                      <i class="fas fa-comments"></i>
+                      <span id="messages-badge" class="notification-badge hidden">0</span>
+                    </button>
+                    <button id="nav-profile" class="nav-btn text-gray-600 dark:text-gray-400 hover:text-primary px-3 py-2 rounded-lg transition" title="Profile">
+                      <i class="fas fa-user"></i>
+                    </button>
+                    <button id="btn-logout" class="text-gray-600 dark:text-gray-400 hover:text-red-500 px-3 py-2" title="Logout">
+                      <i class="fas fa-sign-out-alt"></i>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </nav>
+
+            <div id="main-content" class="max-w-7xl mx-auto px-4 py-6">
+              ${this.renderContent()}
+            </div>
+          </div>
+        `;
+      },
+
+      renderContent() {
+        switch (this.currentTab) {
+          case "discover":
+            return this.renderDiscover();
+          case "matches":
+            return this.renderMatches();
+          case "messages":
+            return this.renderMessages();
+          case "profile":
+            return this.renderProfile();
+          default:
+            return "";
+        }
+      },
+
+      // NEW DISCOVER: feed/grid with like/dislike, infinite scroll, persistence of dislikes
+      renderDiscover() {
+        const recommendations = this.getDiscoverCandidates();
+        const page = this.feedPage;
+        const slice = recommendations.slice(0, (page + 1) * this.pageSize);
+
+        if (recommendations.length === 0) {
+          return `
+            <div class="text-center py-20">
+              <i class="fas fa-heart-broken text-gray-300 dark:text-gray-600 text-6xl mb-4"></i>
+              <h3 class="text-2xl font-bold text-gray-900 dark:text-white mb-2">No More Users</h3>
+              <p class="text-gray-600 dark:text-gray-400">You’ve reached the end. Check back later for new matches!</p>
+            </div>
+          `;
+        }
+
+        return `
+          <div>
+            <div class="flex items-center justify-between mb-4">
+              <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Discover</h2>
+              <div class="text-sm text-gray-600 dark:text-gray-400">${slice.length} of ${recommendations.length} shown</div>
+            </div>
+            <div id="discover-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              ${slice.map(u => this.renderDiscoverCard(u)).join("")}
+            </div>
+            ${
+              slice.length < recommendations.length
+                ? `<div class="flex justify-center mt-6"><button id="load-more" class="px-4 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700">Load More</button></div>`
+                : `<div class="text-center text-sm text-gray-500 dark:text-gray-400 mt-6">End of results</div>`
+            }
+          </div>
+        `;
+      },
+
+      renderDiscoverCard(user) {
+        const age = Utils.calculateAge(user.birthDate);
+        const photos = user.photos && user.photos.length ? user.photos : [];
+        const profilePic = user.profilePicture || photos[0] || null;
+
+        return `
+          <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl overflow-hidden hover:shadow-2xl transition group" data-user-id="${user.id}">
+            <div class="relative h-64 bg-gradient-to-br from-purple-400 to-pink-400">
+              ${
+                profilePic
+                  ? `<img src="${profilePic}" alt="${user.name}" class="absolute inset-0 w-full h-full object-cover">`
+                  : `<div class="absolute inset-0 flex items-center justify-center text-white"><i class="fas fa-user-circle text-7xl"></i></div>`
+              }
+              <div class="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
+              <div class="absolute bottom-0 left-0 right-0 p-4 text-white">
+                <div class="flex items-end justify-between">
+                  <div class="clickable user-profile-trigger" data-user-id="${user.id}">
+                    <h3 class="text-2xl font-bold">${user.name}, ${age}</h3>
+                    <p class="text-sm opacity-90"><i class="fas fa-map-marker-alt mr-1"></i>${user.city}</p>
+                  </div>
+                  <div class="opacity-0 group-hover:opacity-100 transition flex space-x-2">
+                    <button class="dislike-btn w-10 h-10 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center" title="Not interested" data-user-id="${user.id}">
+                      <i class="fas fa-times"></i>
+                    </button>
+                    <button class="like-btn w-10 h-10 rounded-full bg-green-500 hover:bg-green-600 text-white flex items-center justify-center" title="Like" data-user-id="${user.id}">
+                      <i class="fas fa-heart"></i>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="p-4">
+              ${user.bio ? `<p class="text-gray-700 dark:text-gray-300 line-clamp-2">${user.bio}</p>` : `<p class="text-gray-500 dark:text-gray-400 text-sm">No bio yet.</p>`}
+              ${
+                user.interests && user.interests.length
+                  ? `<div class="flex flex-wrap gap-2 mt-3">${user.interests.slice(0,5).map(i => `<span class="px-2 py-1 bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200 rounded-full text-xs">${i}</span>`).join("")}${user.interests.length>5?`<span class="text-xs text-gray-500">+${user.interests.length-5} more</span>`:""}</div>`
+                  : ""
+              }
+              <div class="mt-4 flex gap-2">
+                <button class="view-profile-btn flex-1 px-3 py-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-900 dark:text-white rounded-lg" data-user-id="${user.id}">
+                  <i class="fas fa-user mr-2"></i>View Profile
+                </button>
+                <button class="message-btn flex-1 px-3 py-2 bg-primary hover:bg-primary-dark text-white rounded-lg" data-user-id="${user.id}">
+                  <i class="fas fa-comment mr-2"></i>Message
+                </button>
+              </div>
+            </div>
+          </div>
+        `;
+      },
+
+      getDiscoverCandidates() {
+        const me = AppState.currentUser;
+        const dislikes = DB.getDislikes().filter(d => d.fromId === me.id).map(d => d.toId);
+        const liked = DB.getLikes().filter(l => l.fromId === me.id).map(l => l.toId);
+
+        // Filter users:
+        // - not me
+        // - not suspended
+        // - not already liked by me
+        // - not disliked by me
+        const users = DB.getUsers().filter(u =>
+          u.id !== me.id &&
+          !u.suspended &&
+          !liked.includes(u.id) &&
+          !dislikes.includes(u.id)
+        );
+
+        // Simple heuristic sorting: users with photos first, then newest
+        users.sort((a, b) => {
+          const ap = (a.photos?.length || 0) > 0 ? 1 : 0;
+          const bp = (b.photos?.length || 0) > 0 ? 1 : 0;
+          if (bp !== ap) return bp - ap;
+          return (b.createdAt || 0) - (a.createdAt || 0);
+        });
+
+        return users;
+      },
+
+      renderMatches() {
+        const matches = DB.getUserMatches(AppState.currentUser.id);
+        const matchedUsers = matches
+          .map((m) => {
+            const otherId = m.users.find((id) => id !== AppState.currentUser.id);
+            return DB.getUser(otherId);
+          })
+          .filter((u) => u);
+
+        if (matchedUsers.length === 0) {
+          return `
+            <div class="text-center py-20">
+              <i class="fas fa-heart text-gray-300 dark:text-gray-600 text-6xl mb-4"></i>
+              <h3 class="text-2xl font-bold text-gray-900 dark:text-white mb-2">No Matches Yet</h3>
+              <p class="text-gray-600 dark:text-gray-400">Start liking profiles to find your match!</p>
+            </div>
+          `;
+        }
+
+        return `
+          <div>
+            <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-6">Your Matches</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              ${matchedUsers
+                .map((user) => {
+                  const age = Utils.calculateAge(user.birthDate);
+                  const profilePic =
+                    user.profilePicture || (user.photos && user.photos[0]);
+                  return `
+                    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden hover:shadow-xl transition cursor-pointer match-card" data-user-id="${user.id}">
+                      <div class="h-48 bg-gradient-to-br from-purple-400 to-pink-400 flex items-center justify-center overflow-hidden clickable user-profile-trigger" data-user-id="${user.id}">
+                        ${
+                          profilePic
+                            ? `<img src="${profilePic}" class="profile-img" alt="profile">`
+                            : `<i class="fas fa-user-circle text-white text-6xl"></i>`
+                        }
+                      </div>
+                      <div class="p-4">
+                        <div class="flex items-center justify-between">
+                          <div class="clickable user-profile-trigger" data-user-id="${user.id}">
+                            <h3 class="text-xl font-bold text-gray-900 dark:text-white">${user.name}, ${age}</h3>
+                            <p class="text-gray-600 dark:text-gray-400 text-sm mb-3"><i class="fas fa-map-marker-alt mr-1"></i>${user.city}</p>
+                          </div>
+                        </div>
+                        ${
+                          user.bio
+                            ? `<p class="text-gray-700 dark:text-gray-300 text-sm mb-3 line-clamp-2">${user.bio}</p>`
+                            : ""
+                        }
+                        <button class="message-btn w-full bg-primary hover:bg-primary-dark text-white font-semibold py-2 rounded-lg transition" data-user-id="${user.id}">
+                          <i class="fas fa-comment mr-2"></i>Message
+                        </button>
+                      </div>
+                    </div>
+                  `;
+                })
+                .join("")}
+            </div>
+          </div>
+        `;
+      },
+
+      renderMessages() {
+        if (this.currentChatUser) {
+          return this.renderChat(this.currentChatUser);
+        }
+
+        const matches = DB.getUserMatches(AppState.currentUser.id);
+        const conversations = matches
+          .map((m) => {
+            const otherId = m.users.find((id) => id !== AppState.currentUser.id);
+            const user = DB.getUser(otherId);
+            if (!user) return null;
+
+            const messages = DB.getConversation(AppState.currentUser.id, otherId);
+            const lastMessage = messages[messages.length - 1];
+            const unreadCount = messages.filter(
+              (msg) => msg.toId === AppState.currentUser.id && !msg.read
+            ).length;
+
+            return { user, lastMessage, unreadCount };
+          })
+          .filter((c) => c);
+
+        conversations.sort((a, b) => {
+          const timeA = a.lastMessage?.timestamp || 0;
+          const timeB = b.lastMessage?.timestamp || 0;
+          return timeB - timeA;
+        });
+
+        // Admin announcements section
+        const adminMsgs = DB.getAdminMessages().filter(m => m.toUserId === AppState.currentUser.id).sort((a,b)=>a.timestamp-b.timestamp);
+        const unreadAdmin = DB.getUnreadAdminCount(AppState.currentUser.id);
+
+        if (conversations.length === 0 && adminMsgs.length === 0) {
+          return `
+            <div class="text-center py-20">
+              <i class="fas fa-comments text-gray-300 dark:text-gray-600 text-6xl mb-4"></i>
+              <h3 class="text-2xl font-bold text-gray-900 dark:text-white mb-2">No Messages</h3>
+              <p class="text-gray-600 dark:text-gray-400">Match with someone to start chatting!</p>
+            </div>
+          `;
+        }
+
+        return `
+          <div class="space-y-6">
+            <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Messages</h2>
+
+            ${
+              adminMsgs.length
+                ? `
+              <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden">
+                <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                  <div class="font-semibold text-gray-900 dark:text-white">
+                    <i class="fas fa-bullhorn mr-2 text-primary"></i>Announcements from Admin
+                  </div>
+                  ${
+                    unreadAdmin
+                      ? `<span class="text-xs px-2 py-1 rounded-full bg-primary text-white">${unreadAdmin} new</span>`
+                      : ""
+                  }
+                </div>
+                <div class="max-h-64 overflow-y-auto divide-y divide-gray-200 dark:divide-gray-700">
+                  ${adminMsgs
+                    .map(
+                      (m) => `
+                    <div class="p-4 text-sm">
+                      <div class="text-gray-900 dark:text-white">${m.text}</div>
+                      <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">${Utils.formatDate(m.timestamp)}</div>
+                    </div>
+                  `
+                    )
+                    .join("")}
+                </div>
+              </div>
+            `
+                : ""
+            }
+
+            ${
+              conversations.length
+                ? `
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg divide-y divide-gray-200 dark:divide-gray-700">
+              ${conversations
+                .map((c) => {
+                  const profilePic =
+                    c.user.profilePicture || (c.user.photos && c.user.photos[0]);
+                  return `
+                    <div class="p-4 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer transition chat-item" data-user-id="${c.user.id}">
+                      <div class="flex items-center space-x-4">
+                        <div class="w-14 h-14 rounded-full bg-gradient-to-br from-purple-400 to-pink-400 flex items-center justify-center flex-shrink-0 overflow-hidden clickable user-profile-trigger" data-user-id="${c.user.id}">
+                          ${
+                            profilePic
+                              ? `<img src="${profilePic}" class="profile-img" alt="avatar">`
+                              : `<i class="fas fa-user text-white text-xl"></i>`
+                          }
+                        </div>
+                        <div class="flex-1 min-w-0">
+                          <div class="flex items-center justify-between mb-1">
+                            <h3 class="font-semibold text-gray-900 dark:text-white truncate clickable user-profile-trigger" data-user-id="${c.user.id}">${c.user.name}</h3>
+                            ${
+                              c.lastMessage
+                                ? `<span class="text-xs text-gray-500 dark:text-gray-400 ml-2">${Utils.formatDate(
+                                    c.lastMessage.timestamp
+                                  )}</span>`
+                                : ""
+                            }
+                          </div>
+                          ${
+                            c.lastMessage
+                              ? `
+                            <p class="text-sm text-gray-600 dark:text-gray-400 truncate">
+                              ${c.lastMessage.fromId === AppState.currentUser.id ? "You: " : ""}${c.lastMessage.text}
+                            </p>
+                          `
+                              : '<p class="text-sm text-gray-500 dark:text-gray-400">No messages yet</p>'
+                          }
+                        </div>
+                        ${
+                          c.unreadCount > 0
+                            ? `
+                          <div class="bg-primary text-white rounded-full w-6 h-6 flex items-center justify-center text-xs font-semibold">
+                            ${c.unreadCount}
+                          </div>
+                        `
+                            : ""
+                        }
+                      </div>
+                    </div>
+                  `;
+                })
+                .join("")}
+            </div>
+            ` : ""
+            }
+          </div>
+        `;
+      },
+
+      renderChat(user) {
+        const messages = DB.getConversation(AppState.currentUser.id, user.id);
+        const age = Utils.calculateAge(user.birthDate);
+        const profilePic = user.profilePicture || (user.photos && user.photos[0]);
+
+        return `
+          <div class="max-w-4xl mx-auto">
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden">
+              <div class="bg-primary p-4 flex items-center space-x-4">
+                <button id="back-to-messages" class="text-white hover:text-gray-200">
+                  <i class="fas fa-arrow-left text-xl"></i>
+                </button>
+                <div class="w-12 h-12 rounded-full bg-white bg-opacity-20 flex items-center justify-center overflow-hidden flex-shrink-0 clickable user-profile-trigger" data-user-id="${user.id}">
+                  ${
+                    profilePic
+                      ? `<img src="${profilePic}" class="profile-img" alt="avatar">`
+                      : `<i class="fas fa-user text-white"></i>`
+                  }
+                </div>
+                <div class="flex-1 clickable user-profile-trigger" data-user-id="${user.id}">
+                  <h3 class="font-semibold text-white">${user.name}, ${age}</h3>
+                  <p class="text-sm text-white text-opacity-80">${user.city}</p>
+                </div>
+                <button id="report-user" class="text-white hover:text-gray-200" data-user-id="${user.id}">
+                  <i class="fas fa-flag"></i>
+                </button>
+              </div>
+
+              <div id="messages-container" class="h-96 overflow-y-auto p-4 space-y-3 bg-gray-50 dark:bg-gray-900">
+                ${
+                  messages.length === 0
+                    ? `
+                  <div class="text-center py-12">
+                    <i class="fas fa-comments text-gray-300 dark:text-gray-600 text-4xl mb-2"></i>
+                    <p class="text-gray-500 dark:text-gray-400">Say hi to ${user.name}!</p>
+                  </div>
+                `
+                    : messages
+                        .map((msg) => {
+                          const isMine = msg.fromId === AppState.currentUser.id;
+                          return `
+                            <div class="flex ${isMine ? "justify-end" : "justify-start"}">
+                              <div class="message-bubble ${
+                                isMine
+                                  ? "bg-primary text-white"
+                                  : "bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                              } rounded-2xl px-4 py-2 shadow">
+                                <p class="text-sm">${msg.text}</p>
+                                <p class="text-xs ${
+                                  isMine
+                                    ? "text-white text-opacity-70"
+                                    : "text-gray-500 dark:text-gray-400"
+                                } mt-1">
+                                  ${Utils.formatDate(msg.timestamp)}
+                                </p>
+                              </div>
+                            </div>
+                          `;
+                        })
+                        .join("")
+                }
+              </div>
+
+              <div class="p-4 border-t border-gray-200 dark:border-gray-700">
+                <form id="send-message-form" class="flex space-x-2">
+                  <input type="text" id="message-input" placeholder="Type a message..." required
+                    class="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-full bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-base focus:ring-2 focus:ring-primary focus:border-transparent">
+                  <button type="submit" class="px-6 py-2 bg-primary hover:bg-primary-dark text-white rounded-full transition">
+                    <i class="fas fa-paper-plane"></i>
+                  </button>
+                </form>
+              </div>
+            </div>
+          </div>
+        `;
+      },
+
+      renderProfile() {
+        const user = AppState.currentUser;
+        const age = Utils.calculateAge(user.birthDate);
+        const profilePic = user.profilePicture || (user.photos && user.photos[0]);
+
+        return `
+          <div class="max-w-2xl mx-auto">
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden">
+              <div class="h-48 bg-gradient-to-br from-purple-400 to-pink-400 flex items-center justify-center overflow-hidden">
+                ${
+                  profilePic
+                    ? `<img src="${profilePic}" class="profile-img clickable self-profile-viewer" alt="profile">`
+                    : `<i class="fas fa-user-circle text-white text-8xl clickable self-profile-viewer"></i>`
+                }
+              </div>
+              <div class="p-6">
+                <div class="text-center mb-6">
+                  <h2 class="text-3xl font-bold text-gray-900 dark:text-white mb-2">${user.name}, ${age}</h2>
+                  <p class="text-gray-600 dark:text-gray-400"><i class="fas fa-map-marker-alt mr-1"></i>${user.city}</p>
+                  <p class="text-gray-500 dark:text-gray-500 text-sm mt-1">${user.email}</p>
+                </div>
+
+                <div class="mb-6">
+                  <div class="flex items-center justify-between mb-3">
+                    <h3 class="font-semibold text-gray-900 dark:text-white">Photos</h3>
+                    <button id="add-photos-btn" class="text-primary hover:text-primary-dark text-sm">
+                      <i class="fas fa-plus-circle mr-1"></i>Add Photos
+                    </button>
+                  </div>
+                  ${
+                    user.photos && user.photos.length > 0
+                      ? `
+                    <div class="photo-grid">
+                      ${user.photos
+                        .map(
+                          (photo, index) => `
+                        <div class="photo-item" data-index="${index}">
+                          <img src="${photo}" alt="Photo ${index + 1}">
+                          <div class="absolute inset-0 bg-black bg-opacity-0 hover:bg-opacity-40 transition flex items-center justify-center space-x-2">
+                            ${
+                              !user.profilePicture || user.profilePicture !== photo
+                                ? `
+                              <button class="set-profile-pic-btn opacity-0 hover:opacity-100 bg-white text-gray-900 px-2 py-1 rounded text-xs" data-index="${index}">
+                                <i class="fas fa-star"></i> Set as Profile
+                              </button>
+                            `
+                                : `
+                              <span class="opacity-0 hover:opacity-100 bg-primary text-white px-2 py-1 rounded text-xs">
+                                <i class="fas fa-star"></i> Profile Pic
+                              </span>
+                            `
+                            }
+                            <a class="opacity-0 hover:opacity-100 bg-white text-gray-900 px-2 py-1 rounded text-xs" href="${photo}" download="my-photo-${index+1}.jpg">
+                              <i class="fas fa-download"></i> Download
+                            </a>
+                            <button class="delete-photo-btn opacity-0 hover:opacity-100 bg-red-500 text-white px-2 py-1 rounded text-xs" data-index="${index}">
+                              <i class="fas fa-trash"></i>
+                            </button>
+                          </div>
+                        </div>
+                      `
+                        )
+                        .join("")}
+                    </div>
+                  `
+                      : `
+                    <p class="text-gray-500 dark:text-gray-400 text-center py-8">No photos yet. Add some to show on your profile!</p>
+                  `
+                  }
+                </div>
+
+                ${
+                  user.bio
+                    ? `
+                  <div class="mb-6">
+                    <h3 class="font-semibold text-gray-900 dark:text-white mb-2">About</h3>
+                    <p class="text-gray-700 dark:text-gray-300">${user.bio}</p>
+                  </div>
+                `
+                    : ""
+                }
+
+                ${
+                  user.interests.length > 0
+                    ? `
+                  <div class="mb-6">
+                    <h3 class="font-semibold text-gray-900 dark:text-white mb-2">Interests</h3>
+                    <div class="flex flex-wrap gap-2">
+                      ${user.interests
+                        .map(
+                          (i) => `
+                        <span class="px-3 py-1 bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200 rounded-full text-sm">${i}</span>
+                      `
+                        )
+                        .join("")}
+                    </div>
+                  </div>
+                `
+                    : ""
+                }
+
+                <div class="mb-6">
+                  <h3 class="font-semibold text-gray-900 dark:text-white mb-2">Details</h3>
+                  <div class="space-y-2 text-sm">
+                    <p class="text-gray-700 dark:text-gray-300"><span class="font-medium">Gender:</span> ${user.gender}</p>
+                    <p class="text-gray-700 dark:text-gray-300"><span class="font-medium">Member since:</span> ${new Date(user.createdAt).toLocaleDateString()}</p>
+                  </div>
+                </div>
+
+                <button id="edit-profile-btn" class="w-full bg-primary hover:bg-primary-dark text-white font-semibold py-3 rounded-lg transition mb-3">
+                  <i class="fas fa-edit mr-2"></i>Edit Profile
+                </button>
+
+                <button id="delete-account-btn" class="w-full bg-red-500 hover:bg-red-600 text-white font-semibold py-3 rounded-lg transition">
+                  <i class="fas fa-trash mr-2"></i>Delete Account
+                </button>
+              </div>
+            </div>
+          </div>
+        `;
+      },
+
+      init() {
+        this.updateNotifications();
+
+        // Navigation
+        document.getElementById("nav-discover").onclick = () =>
+          this.switchTab("discover");
+        document.getElementById("nav-matches").onclick = () =>
+          this.switchTab("matches");
+        document.getElementById("nav-messages").onclick = () =>
+          this.switchTab("messages");
+        document.getElementById("nav-profile").onclick = () =>
+          this.switchTab("profile");
+        document.getElementById("btn-logout").onclick = () => AppState.logout();
+
+        // Mark admin announcements as read when entering messages tab
+        if (this.currentTab === "messages") {
+          DB.markAdminMessagesAsRead(AppState.currentUser.id);
+        }
+
+        // Initialize tab
+        this.initCurrentTab();
+      },
+
+      switchTab(tab) {
+        this.currentTab = tab;
+        if (tab === "discover") this.feedPage = 0;
+        this.currentChatUser = null;
+        document.getElementById("main-content").innerHTML = this.renderContent();
+        if (tab === "messages") {
+          DB.markAdminMessagesAsRead(AppState.currentUser.id);
+        }
+        this.initCurrentTab();
+        this.updateNavigation();
+      },
+
+      updateNavigation() {
+        document.querySelectorAll(".nav-btn").forEach((btn) => {
+          btn.classList.remove("text-primary");
+          btn.classList.add("text-gray-600", "dark:text-gray-400");
+        });
+
+        const activeBtn = document.getElementById(`nav-${this.currentTab}`);
+        if (activeBtn) {
+          activeBtn.classList.add("text-primary");
+          activeBtn.classList.remove("text-gray-600", "dark:text-gray-400");
+        }
+      },
+
+      updateNotifications() {
+        const unreadCount = DB.getUnreadCount(AppState.currentUser.id);
+        const unreadAdmin = DB.getUnreadAdminCount(AppState.currentUser.id);
+        const total = unreadCount + unreadAdmin;
+
+        const badge = document.getElementById("messages-badge");
+        if (badge) {
+          if (total > 0) {
+            badge.textContent = total;
+            badge.classList.remove("hidden");
+          } else {
+            badge.classList.add("hidden");
+          }
+        }
+      },
+
+      initCurrentTab() {
+        switch (this.currentTab) {
+          case "discover":
+            this.initDiscover();
+            break;
+          case "matches":
+            this.initMatches();
+            break;
+          case "messages":
+            this.initMessages();
+            break;
+          case "profile":
+            this.initProfile();
+            break;
+        }
+        this.updateNavigation();
+        this.updateNotifications();
+
+        // Global attach: any .user-profile-trigger should open full profile modal
+        document.querySelectorAll(".user-profile-trigger").forEach((el) => {
+          el.onclick = (e) => {
+            e.stopPropagation();
+            const userId = el.getAttribute("data-user-id");
+            if (userId) this.showUserFullProfile(userId);
+          };
+        });
+      },
+
+      // NEW discover initializer
+      initDiscover() {
+        // Load more via button
+        const loadMore = document.getElementById("load-more");
+        if (loadMore) {
+          loadMore.onclick = () => {
+            this.feedPage += 1;
+            document.getElementById("main-content").innerHTML = this.renderContent();
+            this.initDiscover();
+          };
+        }
+
+        // Infinite scroll sentinel
+        const grid = document.getElementById("discover-grid");
+        if (grid && loadMore) {
+          const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+              if (entry.isIntersecting) {
+                loadMore.click();
+              }
+            });
+          }, { rootMargin: "200px" });
+          observer.observe(loadMore);
+        }
+
+        // Card-level actions
+        document.querySelectorAll(".view-profile-btn").forEach(btn => {
+          btn.onclick = () => this.showUserFullProfile(btn.getAttribute("data-user-id"));
+        });
+        document.querySelectorAll(".message-btn").forEach(btn => {
+          btn.onclick = () => {
+            const user = DB.getUser(btn.getAttribute("data-user-id"));
+            if (user) {
+              this.currentChatUser = user;
+              this.currentTab = "messages";
+              document.getElementById("main-content").innerHTML = this.renderContent();
+              this.initMessages();
+            }
+          };
+        });
+        document.querySelectorAll(".like-btn").forEach(btn => {
+          btn.onclick = () => {
+            const userId = btn.getAttribute("data-user-id");
+            const other = DB.getUser(userId);
+            DB.addLike(AppState.currentUser.id, userId);
+            // If mutual, show toast
+            if (DB.hasLiked(userId, AppState.currentUser.id)) {
+              Utils.showToast(`It's a match with ${other.name}! 💕`, "success");
+            } else {
+              Utils.showToast(`You liked ${other.name}`, "success");
+            }
+            // Remove from discover list immediately
+            this.removeCardFromDiscover(userId);
+          };
+        });
+        document.querySelectorAll(".dislike-btn").forEach(btn => {
+          btn.onclick = () => {
+            const userId = btn.getAttribute("data-user-id");
+            const other = DB.getUser(userId);
+            DB.addDislike(AppState.currentUser.id, userId);
+            const undo = () => {
+              DB.removeDislike(AppState.currentUser.id, userId);
+              Utils.showToast(`Dislike undone for ${other.name}`, "success");
+              // Re-render discover feed to bring it back
+              document.getElementById("main-content").innerHTML = this.renderContent();
+              this.initDiscover();
+            };
+            Utils.showToast(`You won't see ${other.name} again in Discover`, "info", undo);
+            this.removeCardFromDiscover(userId);
+          };
+        });
+      },
+
+      removeCardFromDiscover(userId) {
+        const card = document.querySelector(`[data-user-id="${userId}"]`);
+        if (card) {
+          card.style.opacity = "0";
+          card.style.transform = "scale(0.98)";
+          setTimeout(() => {
+            card.remove();
+            // If grid empty and more available, re-render
+            const recommendations = this.getDiscoverCandidates();
+            const currentlyShown = document.querySelectorAll("#discover-grid > div").length;
+            const expected = Math.min(recommendations.length, (this.feedPage + 1) * this.pageSize);
+            if (currentlyShown < Math.min(expected, recommendations.length)) {
+              document.getElementById("main-content").innerHTML = this.renderContent();
+              this.initDiscover();
+            } else if (currentlyShown === 0) {
+              document.getElementById("main-content").innerHTML = this.renderContent();
+              this.initDiscover();
+            }
+          }, 150);
+        }
+      },
+
+      initMatches() {
+        document.querySelectorAll(".message-btn").forEach((btn) => {
+          btn.onclick = (e) => {
+            e.stopPropagation();
+            const userId = btn.dataset.userId;
+            const user = DB.getUser(userId);
+            if (user) {
+              this.currentChatUser = user;
+              this.currentTab = "messages";
+              document.getElementById("main-content").innerHTML =
+                this.renderContent();
+              this.initMessages();
+            }
+          };
+        });
+
+        // Clicking card area opens full profile
+        document.querySelectorAll(".match-card .user-profile-trigger").forEach((el) => {
+          el.onclick = (e) => {
+            e.stopPropagation();
+            const userId = el.getAttribute("data-user-id");
+            this.showUserFullProfile(userId);
+          };
+        });
+      },
+
+      initMessages() {
+        // mark admin unread as read
+        DB.markAdminMessagesAsRead(AppState.currentUser.id);
+        this.updateNotifications();
+
+        if (this.currentChatUser) {
+          DB.markMessagesAsRead(AppState.currentUser.id, this.currentChatUser.id);
+          this.updateNotifications();
+          const container = document.getElementById("messages-container");
+          if (container) container.scrollTop = container.scrollHeight;
+
+          const form = document.getElementById("send-message-form");
+          if (form) {
+            form.onsubmit = (e) => {
+              e.preventDefault();
+              const input = document.getElementById("message-input");
+              const text = input.value.trim();
+              if (!text) return;
+
+              DB.addMessage(
+                AppState.currentUser.id,
+                this.currentChatUser.id,
+                text
+              );
+              input.value = "";
+              document.getElementById("main-content").innerHTML =
+                this.renderContent();
+              this.initMessages();
+            };
+          }
+
+          const backBtn = document.getElementById("back-to-messages");
+          if (backBtn) {
+            backBtn.onclick = () => {
+              this.currentChatUser = null;
+              document.getElementById("main-content").innerHTML =
+                this.renderContent();
+              this.initMessages();
+            };
+          }
+
+          const reportBtn = document.getElementById("report-user");
+          if (reportBtn) {
+            reportBtn.onclick = () =>
+              this.showReportDialog(this.currentChatUser.id);
+          }
+
+          // header profile click
+          document.querySelectorAll(".user-profile-trigger").forEach((el) => {
+            el.onclick = (e) => {
+              e.stopPropagation();
+              const userId = el.getAttribute("data-user-id");
+              if (userId) this.showUserFullProfile(userId);
+            };
+          });
+        } else {
+          document.querySelectorAll(".chat-item").forEach((item) => {
+            item.onclick = () => {
+              const userId = item.dataset.userId;
+              const user = DB.getUser(userId);
+              if (user) {
+                this.currentChatUser = user;
+                document.getElementById("main-content").innerHTML =
+                  this.renderContent();
+                this.initMessages();
+              }
+            };
+          });
+          document.querySelectorAll(".user-profile-trigger").forEach((el) => {
+            el.onclick = (e) => {
+              e.stopPropagation();
+              const userId = el.getAttribute("data-user-id");
+              if (userId) this.showUserFullProfile(userId);
+            };
+          });
+        }
+      },
+
+      async showReportDialog(userId) {
+        const modal = document.createElement("div");
+        modal.className =
+          "fixed inset-0 bg-black bg-opacity-50 modal-backdrop flex items-center justify-center z-50 p-4";
+        modal.innerHTML = `
+          <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6 animate-fade-in">
+            <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-4">Report User</h3>
+            <div class="space-y-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Reason</label>
+                <select id="report-reason" class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-base">
+                  <option value="inappropriate">Inappropriate behavior</option>
+                  <option value="harassment">Harassment</option>
+                  <option value="fake">Fake profile</option>
+                  <option value="spam">Spam</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Description</label>
+                <textarea id="report-description" rows="3" class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-base"></textarea>
+              </div>
+            </div>
+            <div class="flex justify-end space-x-3 mt-6">
+              <button class="cancel-btn px-4 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition">Cancel</button>
+              <button class="submit-btn px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg transition">Submit Report</button>
+            </div>
+          </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        modal.querySelector(".submit-btn").onclick = () => {
+          const reason = modal.querySelector("#report-reason").value;
+          const description = modal
+            .querySelector("#report-description")
+            .value.trim();
+
+          DB.addReport(AppState.currentUser.id, userId, reason, description);
+          modal.remove();
+          Utils.showToast("Report submitted", "success");
+        };
+
+        modal.querySelector(".cancel-btn").onclick = () => modal.remove();
+      },
+
+      initProfile() {
+        const addPhotosBtn = document.getElementById("add-photos-btn");
+        if (addPhotosBtn) {
+          addPhotosBtn.onclick = async () => {
+            try {
+              const user = AppState.currentUser;
+              const currentPhotos = user.photos || [];
+
+              if (currentPhotos.length >= 9) {
+                Utils.showToast("Maximum 9 photos allowed", "error");
+                return;
+              }
+
+              const newPhotos = await Utils.handleImageUpload(true);
+              if (newPhotos && newPhotos.length > 0) {
+                const remainingSlots = 9 - currentPhotos.length;
+                const photosToAdd = newPhotos.slice(0, remainingSlots);
+                const updatedPhotos = [...currentPhotos, ...photosToAdd];
+
+                if (photosToAdd.length < newPhotos.length) {
+                  Utils.showToast(
+                    `Only ${photosToAdd.length} photos added (max 9 total)`,
+                    "info"
+                  );
+                }
+
+                const updates = { photos: updatedPhotos };
+                if (!user.profilePicture && updatedPhotos[0]) {
+                  updates.profilePicture = updatedPhotos[0];
+                }
+
+                DB.updateUser(user.id, updates);
+                AppState.currentUser = DB.getUser(user.id);
+
+                document.getElementById("main-content").innerHTML =
+                  this.renderContent();
+                this.initProfile();
+              }
+            } catch (error) {
+              console.error("Error adding photos:", error);
+              Utils.showToast("Failed to add photos. Please try again.", "error");
+            }
+          };
+        }
+
+        // Click header image to open full viewer for own photos
+        const selfViewer = document.querySelector(".self-profile-viewer");
+        if (selfViewer) {
+          selfViewer.onclick = () => {
+            const u = AppState.currentUser;
+            if (u.photos && u.photos.length) {
+              Utils.showPhotoViewerWithDetails(u, 0);
+            }
+          };
+        }
+
+        document.querySelectorAll(".photo-item img").forEach((img, index) => {
+          img.onclick = (e) => {
+            if (
+              !e.target.closest(".set-profile-pic-btn") &&
+              !e.target.closest(".delete-photo-btn")
+            ) {
+              const user = AppState.currentUser;
+              if (user.photos && user.photos.length > 0) {
+                Utils.showPhotoViewerWithDetails(user, index);
+              }
+            }
+          };
+        });
+
+        document.querySelectorAll(".set-profile-pic-btn").forEach((btn) => {
+          btn.onclick = (e) => {
+            e.stopPropagation();
+            const index = parseInt(btn.dataset.index);
+            const user = AppState.currentUser;
+            if (user.photos && user.photos[index]) {
+              DB.updateUser(user.id, { profilePicture: user.photos[index] });
+              AppState.currentUser = DB.getUser(user.id);
+              document.getElementById("main-content").innerHTML =
+                this.renderContent();
+              this.initProfile();
+              Utils.showToast("Profile picture updated", "success");
+            }
+          };
+        });
+
+        document.querySelectorAll(".delete-photo-btn").forEach((btn) => {
+          btn.onclick = async (e) => {
+            e.stopPropagation();
+            const index = parseInt(btn.dataset.index);
+
+            const confirmed = await Utils.showModal({
+              title: "Delete Photo",
+              message: "Are you sure you want to delete this photo?",
+              type: "danger",
+              confirmText: "Delete",
+            });
+
+            if (confirmed) {
+              const user = AppState.currentUser;
+              const photos = [...user.photos];
+              const deletedPhoto = photos[index];
+              photos.splice(index, 1);
+
+              const updates = { photos };
+              if (user.profilePicture === deletedPhoto) {
+                updates.profilePicture = photos[0] || null;
+              }
+
+              DB.updateUser(user.id, updates);
+              AppState.currentUser = DB.getUser(user.id);
+              document.getElementById("main-content").innerHTML =
+                this.renderContent();
+              this.initProfile();
+              Utils.showToast("Photo deleted", "success");
+            }
+          };
+        });
+
+        document.getElementById("edit-profile-btn").onclick = () =>
+          this.showEditProfile();
+        document.getElementById("delete-account-btn").onclick = async () => {
+          const confirmed = await Utils.showModal({
+            title: "Delete Account",
+            message:
+              "Are you sure you want to delete your account? This action cannot be undone.",
+            type: "danger",
+            confirmText: "Delete",
+          });
+
+          if (confirmed) {
+            DB.deleteUser(AppState.currentUser.id);
+            Utils.showToast("Account deleted", "success");
+            AppState.logout();
+          }
+        };
+      },
+
+      showEditProfile() {
+        const user = AppState.currentUser;
+        const modal = document.createElement("div");
+        modal.className =
+          "fixed inset-0 bg-black bg-opacity-50 modal-backdrop flex items-center justify-center z-50 p-4 overflow-y-auto";
+        modal.innerHTML = `
+          <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full p-6 my-8 animate-fade-in">
+            <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-4">Edit Profile</h3>
+            <form id="edit-profile-form" class="space-y-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Name</label>
+                <input type="text" id="edit-name" value="${user.name}" required
+                  class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-base">
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">City</label>
+                <input type="text" id="edit-city" value="${user.city}" required
+                  class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-base">
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Bio</label>
+                <textarea id="edit-bio" rows="3" class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-base">${user.bio || ""}</textarea>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Interests (comma-separated)</label>
+                <input type="text" id="edit-interests" value="${user.interests.join(", ")}"
+                  class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-base">
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">New Password (leave blank to keep current)</label>
+                <input type="password" id="edit-password" minlength="6"
+                  class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-base">
+              </div>
+              <div class="flex justify-end space-x-3 mt-6">
+                <button type="button" class="cancel-btn px-4 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition">Cancel</button>
+                <button type="submit" class="px-4 py-2 bg-primary hover:bg-primary-dark text-white rounded-lg transition">Save Changes</button>
+              </div>
+            </form>
+          </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        modal.querySelector("#edit-profile-form").onsubmit = (e) => {
+          e.preventDefault();
+
+          const updates = {
+            name: modal.querySelector("#edit-name").value.trim(),
+            city: modal.querySelector("#edit-city").value.trim(),
+            bio: modal.querySelector("#edit-bio").value.trim(),
+            interests: modal
+              .querySelector("#edit-interests")
+              .value.split(",")
+              .map((i) => i.trim())
+              .filter((i) => i),
+          };
+
+          const newPassword = modal.querySelector("#edit-password").value;
+          if (newPassword) updates.password = newPassword;
+
+          DB.updateUser(user.id, updates);
+          AppState.currentUser = DB.getUser(user.id);
+
+          modal.remove();
+          Utils.showToast("Profile updated", "success");
+          document.getElementById("main-content").innerHTML =
+            this.renderContent();
+          this.initProfile();
+        };
+
+        modal.querySelector(".cancel-btn").onclick = () => modal.remove();
+      },
+
+      // Full profile modal (unchanged structure, reused)
+      showUserFullProfile(userId) {
+        const user = typeof userId === "string" ? DB.getUser(userId) : userId;
+        if (!user) return;
+
+        const age = Utils.calculateAge(user.birthDate);
+        const photos = user.photos || [];
+        let currentIndex = 0;
+
+        const modal = document.createElement("div");
+        modal.className = "fixed inset-0 bg-black bg-opacity-50 modal-backdrop flex items-center justify-center z-50 p-4";
+        modal.innerHTML = `
+          <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-3xl w-full animate-fade-in overflow-hidden">
+            <div class="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+              <div class="flex items-center space-x-3">
+                <div class="w-12 h-12 rounded-full overflow-hidden bg-gradient-to-br from-purple-400 to-pink-400 flex items-center justify-center">
+                  ${
+                    user.profilePicture
+                      ? `<img src="${user.profilePicture}" class="w-full h-full object-cover" alt="avatar">`
+                      : `<i class="fas fa-user text-white"></i>`
+                  }
+                </div>
+                <div>
+                  <div class="text-lg font-semibold text-gray-900 dark:text-white">${user.name}, ${age}</div>
+                  <div class="text-sm text-gray-500 dark:text-gray-400"><i class="fas fa-map-marker-alt mr-1"></i>${user.city}</div>
+                </div>
+              </div>
+              <button class="close-btn text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white">
+                <i class="fas fa-times text-xl"></i>
+              </button>
+            </div>
+
+            <div class="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div class="relative bg-gray-100 dark:bg-gray-900 rounded-lg flex items-center justify-center min-h-[240px]">
+                ${
+                  photos.length
+                    ? `
+                      <button class="absolute left-2 top-1/2 -translate-y-1/2 text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white prev-photo"><i class="fas fa-chevron-left text-2xl"></i></button>
+                      <img src="${photos[0]}" class="max-h-[360px] object-contain main-photo">
+                      <button class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white next-photo"><i class="fas fa-chevron-right text-2xl"></i></button>
+                      <a class="absolute top-2 right-2 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 px-3 py-1 rounded-md text-sm shadow download-current" href="${photos[0]}" download="${user.name.replace(/\s+/g,'_')}-photo-1.jpg">
+                        <i class="fas fa-download mr-1"></i>Download
+                      </a>
+                    `
+                    : `
+                      <div class="text-center text-gray-400">
+                        <i class="fas fa-image text-5xl mb-3"></i>
+                        <div>No photos</div>
+                      </div>
+                    `
+                }
+              </div>
+              <div>
+                ${user.bio ? `<div class="mb-4"><div class="font-semibold text-gray-900 dark:text-white mb-1">About</div><div class="text-gray-700 dark:text-gray-300">${user.bio}</div></div>` : ""}
+                ${
+                  user.interests && user.interests.length
+                    ? `
+                  <div class="mb-4">
+                    <div class="font-semibold text-gray-900 dark:text-white mb-2">Interests</div>
+                    <div class="flex flex-wrap gap-2">
+                      ${user.interests.map(i => `<span class="px-2 py-1 bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200 rounded-full text-xs">${i}</span>`).join("")}
+                    </div>
+                  </div>
+                ` : ""
+                }
+                <div class="text-sm text-gray-600 dark:text-gray-400 space-y-1">
+                  <div><span class="font-medium text-gray-900 dark:text-gray-200">Gender:</span> ${user.gender}</div>
+                  <div><span class="font-medium text-gray-900 dark:text-gray-200">Member since:</span> ${new Date(user.createdAt).toLocaleDateString()}</div>
+                  <div><span class="font-medium text-gray-900 dark:text-gray-200">Email:</span> ${user.email}</div>
+                </div>
+                <div class="mt-4">
+                  ${
+                    user.id !== AppState.currentUser.id
+                      ? `<button class="start-chat bg-primary hover:bg-primary-dark text-white px-4 py-2 rounded-md">
+                          <i class="fas fa-comment mr-2"></i>Message ${user.name.split(' ')[0]}
+                        </button>`
+                      : ``
+                  }
+                </div>
+              </div>
+            </div>
+
+            ${
+              photos.length
+                ? `
+              <div class="px-4 pb-4">
+                <div class="flex space-x-2 overflow-x-auto">
+                  ${photos.map((p,i)=>`
+                    <img src="${p}" data-index="${i}" class="h-16 w-16 object-cover rounded-md border-2 ${i===0?'border-primary':'border-transparent'} photo-thumb cursor-pointer" alt="thumb ${i+1}">
+                  `).join("")}
+                </div>
+              </div>
+            ` : ""
+            }
+          </div>
+        `;
+        document.body.appendChild(modal);
+
+        const close = () => modal.remove();
+        modal.querySelector(".close-btn").onclick = close;
+        modal.onclick = (e) => { if (e.target === modal) close(); };
+
+        const mainPhoto = modal.querySelector(".main-photo");
+        const prev = modal.querySelector(".prev-photo");
+        const next = modal.querySelector(".next-photo");
+        const downloadBtn = modal.querySelector(".download-current");
+
+        const setIndex = (idx) => {
+          const arr = photos.length ? photos : [];
+          if (!arr.length) return;
+          currentIndex = ((idx % arr.length) + arr.length) % arr.length;
+          if (mainPhoto) mainPhoto.src = arr[currentIndex];
+          if (downloadBtn) {
+            downloadBtn.href = arr[currentIndex];
+            downloadBtn.setAttribute("download", `${user.name.replace(/\s+/g,'_')}-photo-${currentIndex+1}.jpg`);
+          }
+          modal.querySelectorAll(".photo-thumb").forEach((t) => {
+            const i = parseInt(t.getAttribute("data-index"));
+            t.classList.toggle("border-primary", i === currentIndex);
+            t.classList.toggle("border-transparent", i !== currentIndex);
+          });
+        };
+
+        if (prev) prev.onclick = () => setIndex(currentIndex - 1);
+        if (next) next.onclick = () => setIndex(currentIndex + 1);
+        modal.querySelectorAll(".photo-thumb").forEach((t) => {
+          t.onclick = () => setIndex(parseInt(t.getAttribute("data-index")));
+        });
+
+        const startChatBtn = modal.querySelector(".start-chat");
+        if (startChatBtn) {
+          startChatBtn.onclick = () => {
+            this.currentChatUser = user;
+            this.currentTab = "messages";
+            document.getElementById("main-content").innerHTML = this.renderContent();
+            this.initMessages();
+            close();
+          };
+        }
+      },
+    };
+
+    // ============================================
+    // ADMIN DASHBOARD
+    // ============================================
+    const AdminDashboard = {
+      currentView: "overview",
+
+      render() {
+        return `
+          <div class="min-h-screen bg-gray-50 dark:bg-gray-900">
+            <nav class="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200 dark:border-gray-700">
+              <div class="max-w-7xl mx-auto px-4">
+                <div class="flex items-center justify-between h-16">
+                  <div class="flex items-center space-x-2">
+                    <i class="fas fa-shield-alt text-primary text-2xl"></i>
+                    <span class="text-xl font-bold text-gray-900 dark:text-white">Admin Dashboard</span>
+                  </div>
+                  <button id="admin-logout" class="text-gray-600 dark:text-gray-400 hover:text-red-500 px-3 py-2">
+                    <i class="fas fa-sign-out-alt mr-2"></i>Logout
+                  </button>
+                </div>
+              </div>
+            </nav>
+
+            <div class="max-w-7xl mx-auto px-4 py-6">
+              <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+                <div class="md:col-span-1">
+                  <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-4 space-y-2">
+                    <button class="admin-nav-btn w-full text-left px-4 py-3 rounded-lg transition hover:bg-gray-100 dark:hover:bg-gray-700" data-view="overview">
+                      <i class="fas fa-chart-line mr-2"></i>Overview
+                    </button>
+                    <button class="admin-nav-btn w-full text-left px-4 py-3 rounded-lg transition hover:bg-gray-100 dark:hover:bg-gray-700" data-view="users">
+                      <i class="fas fa-users mr-2"></i>Users
+                    </button>
+                    <button class="admin-nav-btn w-full text-left px-4 py-3 rounded-lg transition hover:bg-gray-100 dark:hover:bg-gray-700" data-view="reports">
+                      <i class="fas fa-flag mr-2"></i>Reports
+                    </button>
+                    <button class="admin-nav-btn w-full text-left px-4 py-3 rounded-lg transition hover:bg-gray-100 dark:hover:bg-gray-700" data-view="broadcast">
+                      <i class="fas fa-bullhorn mr-2"></i>Broadcast
+                    </button>
+                    <button class="admin-nav-btn w-full text-left px-4 py-3 rounded-lg transition hover:bg-gray-100 dark:hover:bg-gray-700" data-view="logs">
+                      <i class="fas fa-list mr-2"></i>Activity Logs
+                    </button>
+                    <button class="admin-nav-btn w-full text-left px-4 py-3 rounded-lg transition hover:bg-gray-100 dark:hover:bg-gray-700" data-view="settings">
+                      <i class="fas fa-cog mr-2"></i>Settings
+                    </button>
+                  </div>
+                </div>
+
+                <div class="md:col-span-3">
+                  <div id="admin-content">
+                    ${this.renderContent()}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+      },
+
+      renderContent() {
+        switch (this.currentView) {
+          case "overview":
+            return this.renderOverview();
+          case "users":
+            return this.renderUsers();
+          case "reports":
+            return this.renderReports();
+          case "broadcast":
+            return this.renderBroadcast();
+          case "logs":
+            return this.renderLogs();
+          case "settings":
+            return this.renderSettings();
+          default:
+            return "";
+        }
+      },
+
+      renderOverview() {
+        const users = DB.getUsers();
+        const matches = DB.getMatches();
+        const reports = DB.getReports();
+        const pendingReports = reports.filter((r) => r.status === "pending").length;
+
+        const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+        const logs = DB.getLogs();
+        const recentLogins = logs.filter(
+          (l) => l.action === "user_login" && l.timestamp > sevenDaysAgo
+        );
+        const activeUsers = new Set(recentLogins.map((l) => l.details)).size;
+
+        return `
+          <div class="space-y-6">
+            <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Overview</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <p class="text-gray-600 dark:text-gray-400 text-sm">Total Users</p>
+                    <p class="text-3xl font-bold text-gray-900 dark:text-white mt-1">${users.length}</p>
+                  </div>
+                  <i class="fas fa-users text-blue-500 text-3xl"></i>
+                </div>
+              </div>
+              <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <p class="text-gray-600 dark:text-gray-400 text-sm">Active Users</p>
+                    <p class="text-3xl font-bold text-gray-900 dark:text-white mt-1">${activeUsers}</p>
+                  </div>
+                  <i class="fas fa-user-check text-green-500 text-3xl"></i>
+                </div>
+              </div>
+              <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <p class="text-gray-600 dark:text-gray-400 text-sm">Total Matches</p>
+                    <p class="text-3xl font-bold text-gray-900 dark:text-white mt-1">${matches.length}</p>
+                  </div>
+                  <i class="fas fa-heart text-pink-500 text-3xl"></i>
+                </div>
+              </div>
+              <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <p class="text-gray-600 dark:text-gray-400 text-sm">Pending Reports</p>
+                    <p class="text-3xl font-bold text-gray-900 dark:text-white mt-1">${pendingReports}</p>
+                  </div>
+                    <i class="fas fa-flag text-red-500 text-3xl"></i>
+                </div>
+              </div>
+            </div>
+
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
+              <h3 class="text-lg font-bold text-gray-900 dark:text-white mb-4">Recent Activity</h3>
+              <div class="space-y-3">
+                ${logs
+                  .slice(0, 10)
+                  .map(
+                    (log) => `
+                  <div class="flex items-center justify-between py-2 border-b border-gray-200 dark:border-gray-700 last:border-0">
+                    <div>
+                      <p class="text-sm font-medium text-gray-900 dark:text-white">${log.action
+                        .replace(/_/g, " ")
+                        .toUpperCase()}</p>
+                      <p class="text-xs text-gray-500 dark:text-gray-400">${log.details}</p>
+                    </div>
+                    <span class="text-xs text-gray-500 dark:text-gray-400">${Utils.formatDate(
+                      log.timestamp
+                    )}</span>
+                  </div>
+                `
+                  )
+                  .join("")}
+              </div>
+            </div>
+          </div>
+        `;
+      },
+
+      renderUsers() {
+        const users = DB.getUsers();
+        return `
+          <div class="space-y-6">
+            <div class="flex items-center justify-between">
+              <h2 class="text-2xl font-bold text-gray-900 dark:text-white">User Management</h2>
+              <span class="text-gray-600 dark:text-gray-400">${users.length} total users</span>
+            </div>
+
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-4">
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <input id="admin-user-search" type="text" placeholder="Search by name or email..." class="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white md:col-span-1">
+                <input id="admin-user-city" type="text" placeholder="Filter by city..." class="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white md:col-span-1">
+                <select id="admin-user-status" class="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                  <option value="">All statuses</option>
+                  <option value="active">Active</option>
+                  <option value="suspended">Suspended</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden">
+              <div class="overflow-x-auto">
+                <table class="w-full">
+                  <thead class="bg-gray-50 dark:bg-gray-700">
+                    <tr>
+                      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">User</th>
+                      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Email</th>
+                      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Location</th>
+                      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Joined</th>
+                      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
+                      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="admin-users-tbody" class="divide-y divide-gray-200 dark:divide-gray-700">
+                    ${users
+                      .map((user) => {
+                        const age = Utils.calculateAge(user.birthDate);
+                        return `
+                          <tr class="hover:bg-gray-50 dark:hover:bg-gray-700" data-name="${user.name.toLowerCase()}" data-email="${user.email.toLowerCase()}" data-city="${user.city.toLowerCase()}" data-status="${user.suspended ? 'suspended' : 'active'}">
+                            <td class="px-6 py-4 whitespace-nowrap">
+                              <div class="flex items-center">
+                                <div class="w-10 h-10 rounded-full overflow-hidden bg-gradient-to-br from-purple-400 to-pink-400 flex items-center justify-center flex-shrink-0 clickable admin-user-profile" data-user-id="${user.id}" title="View profile">
+                                  ${
+                                    user.profilePicture
+                                      ? `<img src="${user.profilePicture}" class="w-full h-full object-cover" alt="avatar">`
+                                      : `<i class="fas fa-user text-white"></i>`
+                                  }
+                                </div>
+                                <div class="ml-3">
+                                  <p class="text-sm font-medium text-gray-900 dark:text-white">${user.name}</p>
+                                  <p class="text-xs text-gray-500 dark:text-gray-400">${age} years old</p>
+                                </div>
+                              </div>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">${user.email}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">${user.city}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">${new Date(user.createdAt).toLocaleDateString()}</td>
+                            <td class="px-6 py-4 whitespace-nowrap">
+                              <span class="px-2 py-1 text-xs rounded-full ${
+                                user.suspended
+                                  ? "bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200"
+                                  : "bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200"
+                              }">
+                                ${user.suspended ? "Suspended" : "Active"}
+                              </span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm space-x-2">
+                              <button class="send-admin-msg-btn text-blue-600 hover:text-blue-800 dark:text-blue-400" data-user-id="${user.id}" title="Send message">
+                                <i class="fas fa-paper-plane"></i>
+                              </button>
+                              <button class="toggle-suspend-btn text-yellow-600 hover:text-yellow-800 dark:text-yellow-400" data-user-id="${user.id}" title="${user.suspended ? "Activate" : "Suspend"}">
+                                <i class="fas fa-${user.suspended ? "check" : "ban"}"></i>
+                              </button>
+                              <button class="delete-user-btn text-red-600 hover:text-red-800 dark:text-red-400" data-user-id="${user.id}" title="Delete">
+                                <i class="fas fa-trash"></i>
+                              </button>
+                            </td>
+                          </tr>
+                        `;
+                      })
+                      .join("")}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        `;
+      },
+
+      renderReports() {
+        const reports = DB.getReports();
+        return `
+          <div class="space-y-6">
+            <div class="flex items-center justify-between">
+              <h2 class="text-2xl font-bold text-gray-900 dark:text-white">User Reports</h2>
+              <span class="text-gray-600 dark:text-gray-400">${reports.length} total reports</span>
+            </div>
+
+            ${
+              reports.length === 0
+                ? `
+              <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-12 text-center">
+                <i class="fas fa-check-circle text-green-500 text-6xl mb-4"></i>
+                <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-2">No Reports</h3>
+                <p class="text-gray-600 dark:text-gray-400">All clear! No user reports to review.</p>
+              </div>
+            `
+                : `
+              <div class="space-y-4">
+                ${reports
+                  .map((report) => {
+                    const reporter = DB.getUser(report.reporterId);
+                    const reported = DB.getUser(report.reportedId);
+                    return `
+                      <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
+                        <div class="flex items-start justify-between mb-4">
+                          <div class="flex-1">
+                            <div class="flex items-center space-x-2 mb-2">
+                              <span class="px-3 py-1 text-xs rounded-full ${
+                                report.status === "pending"
+                                  ? "bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200"
+                                  : report.status === "resolved"
+                                  ? "bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200"
+                                  : "bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200"
+                              }">
+                                ${report.status.toUpperCase()}
+                              </span>
+                              <span class="text-sm text-gray-500 dark:text-gray-400">${Utils.formatDate(
+                                report.timestamp
+                              )}</span>
+                            </div>
+                            <p class="text-sm text-gray-700 dark:text-gray-300">
+                              <strong>${reporter ? reporter.name : "Unknown"}</strong> reported
+                              <strong>${reported ? reported.name : "Unknown"}</strong>
+                            </p>
+                            <p class="text-sm text-gray-600 dark:text-gray-400 mt-2">
+                              <strong>Reason:</strong> ${report.reason}
+                            </p>
+                            ${
+                              report.description
+                                ? `
+                              <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                                <strong>Details:</strong> ${report.description}
+                              </p>
+                            `
+                                : ""
+                            }
+                          </div>
+                          ${
+                            report.status === "pending"
+                              ? `
+                            <div class="flex space-x-2 ml-4">
+                              <button class="resolve-report-btn px-3 py-1 bg-green-500 hover:bg-green-600 text-white rounded text-sm" data-report-id="${report.id}">
+                                Resolve
+                              </button>
+                              <button class="dismiss-report-btn px-3 py-1 bg-gray-500 hover:bg-gray-600 text-white rounded text-sm" data-report-id="${report.id}">
+                                Dismiss
+                              </button>
+                            </div>
+                          `
+                              : ""
+                          }
+                        </div>
+                      </div>
+                    `;
+                  })
+                  .join("")}
+              </div>
+            `
+            }
+          </div>
+        `;
+      },
+
+      // Broadcast/admin messaging view
+      renderBroadcast() {
+        const users = DB.getUsers();
+        const adminMsgs = DB.getAdminMessages().sort((a,b)=>b.timestamp-a.timestamp);
+        return `
+          <div class="space-y-6">
+            <div class="flex items-center justify-between">
+              <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Broadcast & Direct Messages</h2>
+            </div>
+
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
+              <h3 class="font-semibold text-gray-900 dark:text-white mb-4">Send Direct Message to a User</h3>
+              <form id="admin-direct-form" class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <select id="admin-direct-user" class="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                  <option value="">Select user...</option>
+                  ${users.map(u=>`<option value="${u.id}">${u.name} (${u.email})</option>`).join("")}
+                </select>
+                <input id="admin-direct-text" type="text" placeholder="Type your message..." class="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white md:col-span-2">
+                <button type="submit" class="md:col-span-3 bg-primary hover:bg-primary-dark text-white px-4 py-2 rounded-lg"><i class="fas fa-paper-plane mr-2"></i>Send</button>
+              </form>
+            </div>
+
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
+              <h3 class="font-semibold text-gray-900 dark:text-white mb-4">Broadcast to All Users</h3>
+              <form id="admin-broadcast-form" class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <input id="admin-broadcast-text" type="text" placeholder="Announcement to all users..." class="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white md:col-span-2">
+                <button type="submit" class="bg-primary hover:bg-primary-dark text-white px-4 py-2 rounded-lg"><i class="fas fa-bullhorn mr-2"></i>Broadcast</button>
+              </form>
+            </div>
+
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden">
+              <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700 font-semibold text-gray-900 dark:text-white">
+                Recent Admin Messages
+              </div>
+              <div class="divide-y divide-gray-200 dark:divide-gray-700 max-h-96 overflow-y-auto">
+                ${
+                  adminMsgs.length
+                    ? adminMsgs.map(m=>{
+                        const to = DB.getUser(m.toUserId);
+                        return `
+                          <div class="p-4 text-sm">
+                            <div class="flex items-center justify-between">
+                              <div class="text-gray-900 dark:text-white">
+                                To: <span class="font-medium">${to ? to.name : 'Unknown'}</span> <span class="text-gray-500 dark:text-gray-400">(${to ? to.email : ''})</span>
+                              </div>
+                              <div class="text-xs text-gray-500 dark:text-gray-400">${new Date(m.timestamp).toLocaleString()}</div>
+                            </div>
+                            <div class="mt-1 text-gray-700 dark:text-gray-300">${m.text}</div>
+                          </div>
+                        `;
+                      }).join("")
+                    : `<div class="p-6 text-center text-gray-500 dark:text-gray-400">No admin messages yet.</div>`
+                }
+              </div>
+            </div>
+          </div>
+        `;
+      },
+
+      renderLogs() {
+        const logs = DB.getLogs(100);
+        return `
+          <div class="space-y-6">
+            <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Activity Logs</h2>
+
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg overflow-hidden">
+              <div class="overflow-x-auto">
+                <table class="w-full">
+                  <thead class="bg-gray-50 dark:bg-gray-700">
+                    <tr>
+                      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Timestamp</th>
+                      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Action</th>
+                      <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Details</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+                    ${logs
+                      .map(
+                        (log) => `
+                      <tr class="hover:bg-gray-50 dark:hover:bg-gray-700">
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                          ${new Date(log.timestamp).toLocaleString()}
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
+                          ${log.action.replace(/_/g, " ").toUpperCase()}
+                        </td>
+                        <td class="px-6 py-4 text-sm text-gray-700 dark:text-gray-300">
+                          ${log.details}
+                        </td>
+                      </tr>
+                    `
+                      )
+                      .join("")}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        `;
+      },
+
+      renderSettings() {
+        const admin = DB.getAdminCreds();
+        return `
+          <div class="space-y-6">
+            <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Settings</h2>
+
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
+              <h3 class="text-lg font-bold text-gray-900 dark:text-white mb-4">Admin Credentials</h3>
+              <div class="space-y-4">
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Username</label>
+                  <input type="text" value="${admin.username}" disabled
+                    class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white text-base">
+                  <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Username cannot be changed</p>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Change Password</label>
+                  <button id="change-password-btn" class="px-4 py-2 bg-primary hover:bg-primary-dark text-white rounded-lg transition">
+                    Change Password
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
+              <h3 class="text-lg font-bold text-gray-900 dark:text-white mb-4">Data Management</h3>
+              <div class="space-y-3">
+                <button id="clear-all-data-btn" class="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg transition">
+                  <i class="fas fa-trash mr-2"></i>Clear All Data
+                </button>
+                <p class="text-xs text-gray-500 dark:text-gray-400">Warning: This will delete all users, matches, messages, and reports.</p>
+              </div>
+            </div>
+          </div>
+        `;
+      },
+
+      init() {
+        document.getElementById("admin-logout").onclick = () => AppState.logout();
+
+        document.querySelectorAll(".admin-nav-btn").forEach((btn) => {
+          btn.onclick = () => {
+            this.currentView = btn.dataset.view;
+            document.getElementById("admin-content").innerHTML =
+              this.renderContent();
+            this.initCurrentView();
+            this.updateNavigation();
+          };
+        });
+
+        this.initCurrentView();
+        this.updateNavigation();
+      },
+
+      updateNavigation() {
+        document.querySelectorAll(".admin-nav-btn").forEach((btn) => {
+          if (btn.dataset.view === this.currentView) {
+            btn.classList.add("bg-primary", "text-white");
+            btn.classList.remove("text-gray-700", "dark:text-gray-300");
+          } else {
+            btn.classList.remove("bg-primary", "text-white");
+            btn.classList.add("text-gray-700", "dark:text-gray-300");
+          }
+        });
+      },
+
+      initCurrentView() {
+        switch (this.currentView) {
+          case "users":
+            this.initUsers();
+            break;
+          case "reports":
+            this.initReports();
+            break;
+          case "settings":
+            this.initSettings();
+            break;
+          case "broadcast":
+            this.initBroadcast();
+            break;
+        }
+        // Enable clicking user avatars in any admin view table to open profile
+        document.querySelectorAll(".admin-user-profile").forEach((el) => {
+          el.onclick = () => {
+            const userId = el.getAttribute("data-user-id");
+            MainApp.showUserFullProfile(userId);
+          };
+        });
+      },
+
+      initUsers() {
+        // Filtering
+        const tbody = document.getElementById("admin-users-tbody");
+        const search = document.getElementById("admin-user-search");
+        const city = document.getElementById("admin-user-city");
+        const status = document.getElementById("admin-user-status");
+
+        const applyFilters = () => {
+          const q = (search.value || "").toLowerCase();
+          const c = (city.value || "").toLowerCase();
+          const s = status.value;
+
+          tbody.querySelectorAll("tr").forEach(tr => {
+            const matchesQ = tr.dataset.name.includes(q) || tr.dataset.email.includes(q);
+            const matchesC = !c || tr.dataset.city.includes(c);
+            const matchesS = !s || tr.dataset.status === s;
+            tr.style.display = (matchesQ && matchesC && matchesS) ? "" : "none";
+          });
+        };
+
+        [search, city, status].forEach(el => el && (el.oninput = applyFilters));
+
+        document.querySelectorAll(".toggle-suspend-btn").forEach((btn) => {
+          btn.onclick = async () => {
+            const userId = btn.dataset.userId;
+            const user = DB.getUser(userId);
+
+            const confirmed = await Utils.showModal({
+              title: user.suspended ? "Activate User" : "Suspend User",
+              message: `Are you sure you want to ${
+                user.suspended ? "activate" : "suspend"
+              } ${user.name}?`,
+              confirmText: user.suspended ? "Activate" : "Suspend",
+            });
+
+            if (confirmed) {
+              DB.updateUser(userId, { suspended: !user.suspended });
+              document.getElementById("admin-content").innerHTML =
+                this.renderContent();
+              this.initUsers();
+              Utils.showToast(
+                `User ${user.suspended ? "activated" : "suspended"}`,
+                "success"
+              );
+            }
+          };
+        });
+
+        document.querySelectorAll(".delete-user-btn").forEach((btn) => {
+          btn.onclick = async () => {
+            const userId = btn.dataset.userId;
+            const user = DB.getUser(userId);
+
+            const confirmed = await Utils.showModal({
+              title: "Delete User",
+              message: `Are you sure you want to permanently delete ${user.name}?`,
+              type: "danger",
+              confirmText: "Delete",
+            });
+
+            if (confirmed) {
+              DB.deleteUser(userId);
+              document.getElementById("admin-content").innerHTML =
+                this.renderContent();
+              this.initUsers();
+              Utils.showToast("User deleted", "success");
+            }
+          };
+        });
+
+        // Admin send direct message from users table
+        document.querySelectorAll(".send-admin-msg-btn").forEach((btn) => {
+          btn.onclick = async () => {
+            const userId = btn.getAttribute("data-user-id");
+            const user = DB.getUser(userId);
+            const text = await Utils.showPrompt({
+              title: `Send message to ${user.name}`,
+              message: "Enter your message:",
+              inputType: "text",
+              placeholder: "Type message...",
+            });
+            if (text) {
+              DB.addAdminMessage(userId, text);
+              Utils.showToast("Message sent", "success");
+            }
+          };
+        });
+      },
+
+      initReports() {
+        document.querySelectorAll(".resolve-report-btn").forEach((btn) => {
+          btn.onclick = () => {
+            const reportId = parseFloat(btn.dataset.reportId);
+            DB.updateReport(reportId, "resolved");
+            document.getElementById("admin-content").innerHTML =
+              this.renderContent();
+            this.initReports();
+            Utils.showToast("Report resolved", "success");
+          };
+        });
+
+        document.querySelectorAll(".dismiss-report-btn").forEach((btn) => {
+          btn.onclick = () => {
+            const reportId = parseFloat(btn.dataset.reportId);
+            DB.updateReport(reportId, "dismissed");
+            document.getElementById("admin-content").innerHTML =
+              this.renderContent();
+            this.initReports();
+            Utils.showToast("Report dismissed", "success");
+          };
+        });
+      },
+
+      initBroadcast() {
+        const directForm = document.getElementById("admin-direct-form");
+        const directUser = document.getElementById("admin-direct-user");
+        const directText = document.getElementById("admin-direct-text");
+        if (directForm) {
+          directForm.onsubmit = (e) => {
+            e.preventDefault();
+            const uid = directUser.value;
+            const text = directText.value.trim();
+            if (!uid) { Utils.showToast("Please select a user", "error"); return; }
+            if (!text) { Utils.showToast("Please type a message", "error"); return; }
+            DB.addAdminMessage(uid, text);
+            directText.value = "";
+            Utils.showToast("Message sent", "success");
+            // refresh broadcast list
+            document.getElementById("admin-content").innerHTML = this.renderContent();
+            this.initBroadcast();
+          };
+        }
+
+        const broadcastForm = document.getElementById("admin-broadcast-form");
+        const broadcastText = document.getElementById("admin-broadcast-text");
+        if (broadcastForm) {
+          broadcastForm.onsubmit = async (e) => {
+            e.preventDefault();
+            const text = broadcastText.value.trim();
+            if (!text) { Utils.showToast("Please type an announcement", "error"); return; }
+            const users = DB.getUsers();
+            users.forEach(u => DB.addAdminMessage(u.id, text));
+            broadcastText.value = "";
+            Utils.showToast("Broadcast sent to all users", "success");
+            document.getElementById("admin-content").innerHTML = this.renderContent();
+            this.initBroadcast();
+          };
+        }
+      },
+
+      initSettings() {
+        const changePasswordBtn = document.getElementById("change-password-btn");
+        if (changePasswordBtn) {
+          changePasswordBtn.onclick = async () => {
+            const newPassword = await Utils.showPrompt({
+              title: "Change Password",
+              message: "Enter new admin password:",
+              inputType: "password",
+              placeholder: "New password",
+            });
+
+            if (newPassword && newPassword.length >= 6) {
+              DB.updateAdminPassword(newPassword);
+              Utils.showToast("Password updated successfully", "success");
+            } else if (newPassword) {
+              Utils.showToast("Password must be at least 6 characters", "error");
+            }
+          };
+        }
+
+        const clearDataBtn = document.getElementById("clear-all-data-btn");
+        if (clearDataBtn) {
+          clearDataBtn.onclick = async () => {
+            const confirmed = await Utils.showModal({
+              title: "Clear All Data",
+              message:
+                "This will permanently delete ALL users, matches, messages, and reports. This action cannot be undone. Are you absolutely sure?",
+              type: "danger",
+              confirmText: "Delete Everything",
+            });
+
+            if (confirmed) {
+              localStorage.setItem("letsdate_users", JSON.stringify([]));
+              localStorage.setItem("letsdate_matches", JSON.stringify([]));
+              localStorage.setItem("letsdate_messages", JSON.stringify([]));
+              localStorage.setItem("letsdate_reports", JSON.stringify([]));
+              localStorage.setItem("letsdate_likes", JSON.stringify([]));
+              localStorage.setItem("letsdate_logs", JSON.stringify([]));
+              localStorage.setItem("letsdate_admin_messages", JSON.stringify([]));
+              localStorage.setItem("letsdate_dislikes", JSON.stringify([]));
+
+              DB.addLog("data_cleared", "All data cleared by admin");
+              Utils.showToast("All data cleared", "success");
+
+              document.getElementById("admin-content").innerHTML =
+                this.renderContent();
+              this.initSettings();
+            }
+          };
+        }
+      },
+    };
+
+    // ============================================
+    // APP INITIALIZATION
+    // ============================================
+    document.addEventListener("DOMContentLoaded", () => {
+      AppState.init();
+      // If page loaded offline, re-init app on coming online first time
+      window.addEventListener("online", () => {
+        if (!AppState.initialized) {
+          AppState.init();
+        } else {
+          // Refresh any current view safely
+          AppState.render();
+        }
+      });
+    });
+  </script>
+</body>
+</html>
